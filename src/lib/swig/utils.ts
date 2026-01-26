@@ -432,3 +432,32 @@ export async function sleepWithCountdown(
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
+
+/**
+ * Generate random delays that sum to a target total
+ * Used to distribute delays across multiple operations for privacy
+ */
+export function generateRandomDelays(totalMs: number, numDelays: number): number[] {
+  if (numDelays === 0) return [];
+  if (totalMs <= 0) return Array(numDelays).fill(0);
+  
+  // Generate random weights for each delay
+  const weights: number[] = [];
+  for (let i = 0; i < numDelays; i++) {
+    weights.push(0.5 + Math.random()); // Random between 0.5 and 1.5
+  }
+  
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  
+  // Distribute totalMs proportionally
+  const delays = weights.map(w => Math.floor((w / totalWeight) * totalMs));
+  
+  // Adjust to ensure exact sum (due to rounding)
+  const actualSum = delays.reduce((sum, d) => sum + d, 0);
+  const diff = totalMs - actualSum;
+  if (diff !== 0) {
+    delays[0] += diff; // Add remainder to first delay
+  }
+  
+  return delays;
+}

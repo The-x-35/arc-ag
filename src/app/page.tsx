@@ -20,13 +20,15 @@ if (poolRegistry.isEmpty()) {
 // Flow step definitions for EOA mode
 const EOA_FLOW_STEPS = [
   { id: 1, label: 'Validate Inputs', description: 'Check wallet and addresses' },
-  { id: 2, label: 'Generate Burner Keypairs', description: 'Create EOA keypairs' },
-  { id: 3, label: 'Deposit to Pool', description: 'Sign and send to privacy pool' },
-  { id: 4, label: 'Wait for Indexing', description: 'Wait for UTXO to be indexed' },
-  { id: 5, label: 'Privacy Delay', description: 'Optional delay for more privacy' },
-  { id: 6, label: 'Withdraw to Burners', description: 'Split funds across burner EOAs' },
-  { id: 7, label: 'Re-deposit from Burners', description: 'Burners deposit back to pool' },
-  { id: 8, label: 'Final Withdraw', description: 'Withdraw to destination address' },
+  { id: 2, label: 'Generate First Burner', description: 'Create first intermediate wallet' },
+  { id: 3, label: 'Send to First Burner', description: 'Sign to send funds to first burner' },
+  { id: 4, label: 'First Burner Deposits', description: 'Deposit to pool in chunks with delays' },
+  { id: 5, label: 'Wait for Indexing', description: 'Wait for UTXO to be indexed' },
+  { id: 6, label: 'Privacy Delay', description: 'Remaining privacy delay' },
+  { id: 7, label: 'Generate Burner Keypairs', description: 'Create additional burner wallets' },
+  { id: 8, label: 'Withdraw to Burners', description: 'Withdraw with random delays' },
+  { id: 9, label: 'Re-deposit from Burners', description: 'Burners deposit back to pool' },
+  { id: 10, label: 'Final Withdraw', description: 'Withdraw to destination with delays' },
 ];
 
 export default function Home() {
@@ -35,6 +37,7 @@ export default function Home() {
   const [destination, setDestination] = useState('');
   const [amount, setAmount] = useState('');
   const [privacyLevel, setPrivacyLevel] = useState(2);
+  const [delayMinutes, setDelayMinutes] = useState(0);
   const [burnerType, setBurnerType] = useState<BurnerType>('eoa');
   const [sponsorFees, setSponsorFees] = useState(false);
   
@@ -130,10 +133,13 @@ export default function Home() {
       // Find exact split
       const splitResult = await transactionIndexer.findExactSplit(connection, amountLamports, numChunks);
       
-      // Get suggestions if split not valid
+      // Get suggestions ONLY if split not valid
       let suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
       if (!splitResult.valid) {
         suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks);
+      } else {
+        // Clear suggestions when we have a valid split
+        suggestions = [];
       }
       
       setSplitPreview(prev => ({
@@ -196,6 +202,7 @@ export default function Home() {
         destination,
         amount: splitPreview.result.totalSol,
         numChunks: privacyLevel,
+        delayMinutes,
         sponsorFees,
         exactChunks: chunks, // Pass exact chunk amounts
       });
@@ -301,6 +308,7 @@ export default function Home() {
               destination={destination}
               amount={amount}
               privacyLevel={privacyLevel}
+              delayMinutes={delayMinutes}
               burnerType={burnerType}
               sponsorFees={sponsorFees}
               splitPreview={splitPreview}
@@ -308,6 +316,7 @@ export default function Home() {
               onDestinationChange={setDestination}
               onAmountChange={handleAmountChange}
               onPrivacyLevelChange={setPrivacyLevel}
+              onDelayChange={setDelayMinutes}
               onBurnerTypeChange={setBurnerType}
               onSponsorFeesChange={setSponsorFees}
               onSelectSuggestion={handleSelectSuggestion}
@@ -345,7 +354,7 @@ export default function Home() {
             Transaction Flow
           </h3>
           <p style={{ color: '#888', fontSize: '12px', marginBottom: '16px' }}>
-            Wallet → Pool → {privacyLevel} Burner EOAs → Pool → Destination
+            Wallet → First Burner → Pool (in chunks) → {privacyLevel} Burner EOAs → Pool → Destination
           </p>
 
           {/* Split Preview Summary */}
@@ -526,7 +535,7 @@ export default function Home() {
                     marginBottom: '8px'
                   }}>
                     <span style={{ fontWeight: '600', color: '#fff', fontSize: '13px' }}>
-                      Burner {burner.index}
+                      {burner.index === 0 ? 'First Burner' : `Burner ${burner.index}`}
                     </span>
                     <span style={{ 
                       padding: '2px 8px', 

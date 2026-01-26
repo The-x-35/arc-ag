@@ -340,68 +340,96 @@ export class TransactionIndexer {
   /**
    * Find exact combination of amounts that sum to target
    * ONLY returns valid if the sum EXACTLY equals targetLamports
+   * Prefers different chunk amounts for better privacy
+   * Uses backtracking to find valid combinations
    */
   private findExactCombination(
     available: AvailableAmount[],
     targetLamports: number,
     numChunks: number
   ): ExactSplitResult {
-    // Sort by lamports for consistent selection
-    const sorted = [...available].sort((a, b) => b.lamports - a.lamports);
+    // Sort by frequency (most common first) then by amount (larger first)
+    const sorted = [...available].sort((a, b) => {
+      if (b.frequency !== a.frequency) return b.frequency - a.frequency;
+      return b.lamports - a.lamports;
+    });
     
-    // Try to find N amounts that sum exactly to target
-    // First, check if we can use equal amounts (most privacy-friendly)
-    const equalAmount = targetLamports / numChunks;
-    const equalChunk = available.find(a => a.lamports === equalAmount);
-    if (equalChunk) {
-      const chunks = Array(numChunks).fill(equalChunk);
+    // Filter to amounts that could fit
+    const validAmounts = sorted.filter(a => 
+      a.lamports >= MIN_CHUNK_LAMPORTS && a.lamports <= targetLamports
+    );
+    
+    if (validAmounts.length === 0) {
       return {
-        valid: true,
-        chunks,
-        totalLamports: targetLamports,
-        totalSol: targetLamports / LAMPORTS_PER_SOL,
+        valid: false,
+        chunks: [],
+        totalLamports: 0,
+        totalSol: 0,
       };
     }
     
-    // Try greedy approach to find exact match
+    // Use backtracking to find combinations with different amounts
     const chunks: AvailableAmount[] = [];
-    let remaining = targetLamports;
+    const usedAmounts = new Set<number>();
     
-    for (let i = 0; i < numChunks - 1 && remaining > 0; i++) {
-      // Find best amount for this chunk that leaves enough for remaining chunks
-      const minRemainingNeeded = MIN_CHUNK_LAMPORTS * (numChunks - i - 1);
-      const maxForThisChunk = remaining - minRemainingNeeded;
+    const findCombination = (currentSum: number, depth: number): boolean => {
+      if (depth === numChunks) {
+        return currentSum === targetLamports;
+      }
       
-      // Find largest amount that fits
-      let bestMatch: AvailableAmount | null = null;
-      for (const amt of sorted) {
-        if (amt.lamports <= maxForThisChunk && amt.lamports >= MIN_CHUNK_LAMPORTS) {
-          bestMatch = amt;
-          break; // Take largest that fits
+      // Prune if we've exceeded target
+      if (currentSum > targetLamports) {
+        return false;
+      }
+      
+      // Calculate min/max for remaining chunks
+      const remainingChunks = numChunks - depth;
+      const minForRemaining = MIN_CHUNK_LAMPORTS * remainingChunks;
+      const maxForThisChunk = targetLamports - currentSum - minForRemaining + MIN_CHUNK_LAMPORTS;
+      
+      // Try each valid amount
+      for (const amt of validAmounts) {
+        if (amt.lamports < MIN_CHUNK_LAMPORTS || amt.lamports > maxForThisChunk) {
+          continue;
+        }
+        
+        // Prefer different amounts (better privacy)
+        const isNewAmount = !usedAmounts.has(amt.lamports);
+        
+        // For early chunks, prefer new amounts; for later chunks, allow repeats if needed
+        if (depth < numChunks - 2 && !isNewAmount) {
+          continue; // Early chunks should be different
+        }
+        
+        chunks.push(amt);
+        if (isNewAmount) {
+          usedAmounts.add(amt.lamports);
+        }
+        
+        if (findCombination(currentSum + amt.lamports, depth + 1)) {
+          return true;
+        }
+        
+        // Backtrack
+        chunks.pop();
+        if (isNewAmount) {
+          usedAmounts.delete(amt.lamports);
         }
       }
       
-      if (!bestMatch) break;
-      
-      chunks.push(bestMatch);
-      remaining -= bestMatch.lamports;
-    }
+      return false;
+    };
     
-    // Check if remaining amount matches an available amount EXACTLY
-    if (chunks.length === numChunks - 1 && remaining >= MIN_CHUNK_LAMPORTS) {
-      const lastChunk = available.find(a => a.lamports === remaining);
-      if (lastChunk) {
-        chunks.push(lastChunk);
-        // Verify total matches exactly
-        const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
-        if (total === targetLamports) {
-          return {
-            valid: true,
-            chunks,
-            totalLamports: targetLamports,
-            totalSol: targetLamports / LAMPORTS_PER_SOL,
-          };
-        }
+    if (findCombination(0, 0)) {
+      // Verify total matches exactly
+      const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
+      if (total === targetLamports) {
+        return {
+          valid: true,
+          chunks,
+          totalLamports: targetLamports,
+          totalSol: targetLamports / LAMPORTS_PER_SOL,
+        };
       }
     }
     
@@ -449,7 +477,8 @@ export class TransactionIndexer {
 
   /**
    * Get suggested amounts based on user's target
-   * Returns list of valid totals they could send (equal splits only for simplicity)
+   * Returns list of valid totals with DIFFERENT chunk amounts for better privacy
+   * Each suggestion is verified to have a valid exact split
    */
   async getSuggestedAmounts(
     connection: Connection,
@@ -459,39 +488,84 @@ export class TransactionIndexer {
     const available = await this.getAvailableAmounts(connection, 100);
     const suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
     
-    // Get amounts that could work for equal splits
+    // Get valid amounts (only use amounts that actually exist in historical data)
     const validAmounts = available
       .filter(a => a.lamports >= MIN_CHUNK_LAMPORTS)
-      .slice(0, 20); // Get more options
+      .slice(0, 30);
     
-    // Generate suggestions using equal splits (most privacy-friendly)
-    // Include amounts both smaller and larger than target
-    for (const amt of validAmounts) {
-      const total = amt.lamports * numChunks;
-      // Include suggestions within a wider range (50% to 200% of target)
-      if (total >= MIN_CHUNK_LAMPORTS * numChunks && total <= targetLamports * 2) {
+    if (validAmounts.length === 0) {
+      return [];
+    }
+    
+    // Generate potential target amounts around the user's target
+    const targetAmounts: number[] = [];
+    
+    // Try amounts close to target (within 20% above/below)
+    for (let offset = -0.2; offset <= 0.2; offset += 0.05) {
+      const testAmount = Math.floor(targetLamports * (1 + offset));
+      if (testAmount >= MIN_CHUNK_LAMPORTS * numChunks) {
+        targetAmounts.push(testAmount);
+      }
+    }
+    
+    // Also try some common round amounts
+    const roundAmounts = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5].map(a => Math.floor(a * LAMPORTS_PER_SOL));
+    for (const roundAmt of roundAmounts) {
+      if (roundAmt >= MIN_CHUNK_LAMPORTS * numChunks && roundAmt <= targetLamports * 2) {
+        targetAmounts.push(roundAmt);
+      }
+    }
+    
+    // Remove duplicates and sort
+    const uniqueTargets = Array.from(new Set(targetAmounts)).sort((a, b) => 
+      Math.abs(a - targetLamports) - Math.abs(b - targetLamports)
+    );
+    
+    // For each target amount, try to find an exact split with different chunks
+    for (const testTarget of uniqueTargets.slice(0, 20)) {
+      const result = this.findExactCombination(validAmounts, testTarget, numChunks);
+      
+      if (result.valid && result.chunks.length === numChunks) {
+        // Check if chunks are different (better privacy)
+        const uniqueChunks = new Set(result.chunks.map(c => c.lamports));
+        const hasVariation = uniqueChunks.size > 1;
+        
+        // Prefer suggestions with variation, but include equal splits too
         suggestions.push({
-          amount: total,
-          sol: total / LAMPORTS_PER_SOL,
-          chunks: Array(numChunks).fill(amt.lamports / LAMPORTS_PER_SOL),
+          amount: result.totalLamports,
+          sol: result.totalSol,
+          chunks: result.chunks.map(c => c.sol),
         });
       }
     }
     
-    // Sort by closeness to target, prioritizing amounts >= target
+    // Sort by closeness to target, prioritizing amounts >= target and more variation
     suggestions.sort((a, b) => {
-      // Prefer amounts that are >= target (user probably wants to send at least that much)
       const aAboveTarget = a.amount >= targetLamports;
       const bAboveTarget = b.amount >= targetLamports;
       
       if (aAboveTarget && !bAboveTarget) return -1;
       if (!aAboveTarget && bAboveTarget) return 1;
       
+      // Prefer suggestions with more variation (different chunks)
+      const aVariation = new Set(a.chunks.map(c => Math.round(c * 1000))).size;
+      const bVariation = new Set(b.chunks.map(c => Math.round(c * 1000))).size;
+      if (aVariation !== bVariation) return bVariation - aVariation;
+      
       // Then sort by closeness to target
       return Math.abs(a.amount - targetLamports) - Math.abs(b.amount - targetLamports);
     });
     
-    return suggestions.slice(0, 6);
+    // Remove duplicates (same total amount)
+    const unique = new Map<number, typeof suggestions[0]>();
+    for (const sug of suggestions) {
+      const rounded = Math.round(sug.amount / 1000000); // Round to nearest 0.001 SOL
+      if (!unique.has(rounded)) {
+        unique.set(rounded, sug);
+      }
+    }
+    
+    return Array.from(unique.values()).slice(0, 6);
   }
 }
 

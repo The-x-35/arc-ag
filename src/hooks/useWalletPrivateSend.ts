@@ -12,7 +12,7 @@ import {
 import bs58 from 'bs58';
 import { clusterApiUrl } from '@solana/web3.js';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
-import { isValidSolanaAddress, formatTime, calculateDelayMs, sleepWithCountdown } from '@/lib/swig/utils';
+import { isValidSolanaAddress, formatTime, sleepWithCountdown, generateRandomDelays } from '@/lib/swig/utils';
 
 // Get RPC URL - same as wallet provider
 const getRpcUrl = () => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(WalletAdapterNetwork.Mainnet);
@@ -35,6 +35,7 @@ export interface WalletPrivateSendParams {
   destination: string;
   amount: number;
   numChunks: number;
+  delayMinutes: number;
   sponsorFees: boolean;
   exactChunks?: number[]; // Exact amounts in lamports for each chunk
 }
@@ -63,13 +64,15 @@ export interface WalletPrivateSendResult {
 
 const STEPS = [
   { id: 1, label: 'Validating inputs' },
-  { id: 2, label: 'Generating burner keypairs' },
-  { id: 3, label: 'Depositing to pool (sign required)' },
-  { id: 4, label: 'Waiting for indexing' },
-  { id: 5, label: 'Privacy delay' },
-  { id: 6, label: 'Withdrawing to burners' },
-  { id: 7, label: 'Re-depositing from burners' },
-  { id: 8, label: 'Final withdrawal to destination' },
+  { id: 2, label: 'Generating first burner wallet' },
+  { id: 3, label: 'Sending to first burner (sign required)' },
+  { id: 4, label: 'First burner depositing to pool in chunks' },
+  { id: 5, label: 'Waiting for indexing' },
+  { id: 6, label: 'Privacy delay' },
+  { id: 7, label: 'Generating burner keypairs' },
+  { id: 8, label: 'Withdrawing to burners' },
+  { id: 9, label: 'Re-depositing from burners' },
+  { id: 10, label: 'Final withdrawal to destination' },
 ];
 
 /**
@@ -99,7 +102,7 @@ export function useWalletPrivateSend() {
   }, []);
 
   const execute = useCallback(async (params: WalletPrivateSendParams) => {
-    const { destination, amount, numChunks, sponsorFees, exactChunks } = params;
+    const { destination, amount, numChunks, delayMinutes, sponsorFees, exactChunks } = params;
     
     if (!connected || !publicKey || !signTransaction) {
       throw new Error('Wallet not connected');
@@ -120,7 +123,7 @@ export function useWalletPrivateSend() {
     const amountLamports = exactChunks && exactChunks.length === numChunks 
       ? exactChunks.reduce((sum, c) => sum + c, 0)
       : Math.floor(amount * LAMPORTS_PER_SOL);
-    const delayMs = calculateDelayMs(numChunks);
+    const delayMs = delayMinutes * 60 * 1000; // Convert minutes to milliseconds
     const signatures: string[] = [];
     const generatedBurners: EOABurnerWalletInfo[] = [];
     const burnerKeypairs: Keypair[] = [];
@@ -163,17 +166,171 @@ export function useWalletPrivateSend() {
         }
       }
       
-      // Check balance
+      // Check balance (including fee buffer for chunk deposits)
+      const feeBufferPerChunk = 0.003 * LAMPORTS_PER_SOL; // 0.003 SOL per chunk deposit
+      const totalFeeBuffer = numChunks * feeBufferPerChunk;
+      const totalAmountWithFees = amountLamports + totalFeeBuffer;
       const balance = await connection.getBalance(publicKey);
-      const requiredBalance = amountLamports + 10000000; // Add buffer for fees
+      const requiredBalance = totalAmountWithFees + 10000000; // Add buffer for transaction fees
       if (balance < requiredBalance) {
-        throw new Error(`Insufficient balance. Have: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL, Need: ${(requiredBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        throw new Error(
+          `Insufficient balance. Have: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL, ` +
+          `Need: ${(requiredBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL ` +
+          `(Amount: ${(amountLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL + Fees: ${(totalFeeBuffer / LAMPORTS_PER_SOL).toFixed(4)} SOL)`
+        );
       }
       
       updateStep(1, 'completed', 'Inputs validated');
 
-      // Step 2: Generate burner keypairs
-      updateStep(2, 'running', `Generating ${numChunks} burner keypairs...`);
+      // Step 2: Generate first burner wallet
+      updateStep(2, 'running', 'Generating first burner wallet...');
+      
+      const firstBurnerKeypair = Keypair.generate();
+      const firstBurnerInfo: EOABurnerWalletInfo = {
+        index: 0,
+        address: firstBurnerKeypair.publicKey.toBase58(),
+        privateKey: bs58.encode(firstBurnerKeypair.secretKey),
+        type: 'eoa',
+      };
+      generatedBurners.push(firstBurnerInfo);
+      setBurnerWallets([...generatedBurners]);
+      
+      updateStep(2, 'completed', 'First burner wallet generated');
+
+      // Step 3: User sends total amount to first burner
+      updateStep(3, 'running', 'Preparing transfer to first burner (please sign)...');
+      
+      // Use the fee buffer already calculated above
+      try {
+        const { SystemProgram, Transaction } = await import('@solana/web3.js');
+        const transaction = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: firstBurnerKeypair.publicKey,
+            lamports: totalAmountWithFees,
+          })
+        );
+        
+        // Get recent blockhash
+        const { blockhash } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = publicKey;
+        
+        // User signs
+        const signedTransaction = await signTransaction(transaction);
+        
+        // Send transaction
+        const txSignature = await connection.sendRawTransaction(signedTransaction.serialize());
+        signatures.push(txSignature);
+        
+        // Wait for confirmation
+        await connection.confirmTransaction(txSignature, 'confirmed');
+        
+        updateStep(3, 'completed', `Sent ${(totalAmountWithFees / LAMPORTS_PER_SOL).toFixed(4)} SOL to first burner`);
+        
+      } catch (err: any) {
+        console.error('Transfer to first burner error:', err);
+        throw new Error(`Transfer to first burner failed: ${err.message}`);
+      }
+
+      // CRITICAL: Initialize SDK components
+      const { deposit, withdraw } = await import('privacycash/utils');
+      // @ts-ignore
+      const { WasmFactory } = await import('@lightprotocol/hasher.rs');
+      const { PrivacyCash } = await import('privacycash');
+      
+      const lightWasm = await WasmFactory.getInstance();
+
+      // Step 4: First burner deposits to pool in chunks with random delays
+      updateStep(4, 'running', 'First burner depositing to pool in chunks...');
+      
+      // Allocate 30% of total delay for chunk deposits
+      const depositDelayPortion = Math.floor(delayMs * 0.3);
+      const depositDelays = generateRandomDelays(depositDelayPortion, numChunks - 1);
+      
+      // Create PrivacyCash client for first burner (with its own encryption service)
+      const firstBurnerClient = new PrivacyCash({
+        RPC_url: getRpcUrl(),
+        owner: firstBurnerKeypair,
+        enableDebug: false,
+      }) as any;
+      
+      // Use exact chunks if provided, otherwise equal split
+      let chunkAmounts: number[];
+      if (exactChunks && exactChunks.length === numChunks) {
+        chunkAmounts = exactChunks;
+        console.log('[useWalletPrivateSend] First burner using exact chunks:', chunkAmounts.map(c => c / LAMPORTS_PER_SOL));
+      } else {
+        const chunkAmount = Math.floor(amountLamports / numChunks);
+        const remainder = amountLamports % numChunks;
+        chunkAmounts = Array.from({ length: numChunks }, (_, i) => 
+          i === numChunks - 1 ? chunkAmount + remainder : chunkAmount
+        );
+        console.log('[useWalletPrivateSend] First burner using equal split:', chunkAmounts.map(c => c / LAMPORTS_PER_SOL));
+      }
+      
+      try {
+        for (let i = 0; i < numChunks; i++) {
+          const chunkAmount = chunkAmounts[i];
+          
+          updateStep(4, 'running', `Depositing chunk ${i + 1}/${numChunks}...`);
+          
+          const firstBurnerSigner = async (tx: VersionedTransaction) => {
+            tx.sign([firstBurnerKeypair]);
+            return tx;
+          };
+          
+          const depositResult = await deposit({
+            lightWasm,
+            amount_in_lamports: chunkAmount,
+            connection: connection,
+            encryptionService: firstBurnerClient.encryptionService,
+            publicKey: firstBurnerKeypair.publicKey,
+            transactionSigner: firstBurnerSigner,
+            keyBasePath: '/circuit2/transaction2',
+            storage: getBrowserStorage(),
+          });
+          
+          signatures.push(depositResult.tx);
+          
+          // Wait for confirmation
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          // Random delay before next deposit (except for last chunk)
+          if (i < numChunks - 1 && depositDelays[i] > 0) {
+            updateStep(4, 'running', `Waiting ${formatTime(depositDelays[i])} before next deposit...`);
+            await sleepWithCountdown(depositDelays[i], (remaining) => {
+              updateStep(4, 'running', `Waiting ${remaining} before next deposit...`);
+            });
+          }
+        }
+        
+        updateStep(4, 'completed', 'All chunks deposited to pool');
+        
+      } catch (err: any) {
+        console.error('First burner deposit error:', err);
+        throw new Error(`First burner deposit failed: ${err.message}`);
+      }
+
+      // Step 5: Wait for indexing
+      updateStep(5, 'running', 'Waiting for UTXO indexing...');
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      updateStep(5, 'completed', 'Deposit indexed');
+
+      // Step 6: Privacy delay (remaining time after chunk deposits)
+      const remainingDelay = delayMs - depositDelayPortion;
+      if (remainingDelay > 0) {
+        updateStep(6, 'running', `Privacy delay: ${formatTime(remainingDelay)}`);
+        await sleepWithCountdown(remainingDelay, (remaining) => {
+          updateStep(6, 'running', `Waiting ${remaining}...`);
+        });
+        updateStep(6, 'completed', 'Privacy delay complete');
+      } else {
+        updateStep(6, 'completed', 'No delay (fast mode)');
+      }
+
+      // Step 7: Generate additional burner keypairs
+      updateStep(7, 'running', `Generating ${numChunks} burner keypairs...`);
       
       for (let i = 0; i < numChunks; i++) {
         const keypair = Keypair.generate();
@@ -189,105 +346,30 @@ export function useWalletPrivateSend() {
         setBurnerWallets([...generatedBurners]);
       }
       
-      updateStep(2, 'completed', `${numChunks} burner keypairs generated`);
+      updateStep(7, 'completed', `${numChunks} burner keypairs generated`);
 
-      // CRITICAL: Initialize SDK components ONCE and reuse throughout
-      // The encryption service must be the SAME for deposit and withdraw!
-      const { deposit, withdraw } = await import('privacycash/utils');
-      // @ts-ignore
-      const { WasmFactory } = await import('@lightprotocol/hasher.rs');
-      const { PrivacyCash } = await import('privacycash');
+      // Step 8: Withdraw from pool to burner keypairs with random delays
+      // Use the first burner's encryption service to decrypt UTXOs
+      updateStep(8, 'running', 'Withdrawing to burner wallets...');
       
-      const lightWasm = await WasmFactory.getInstance();
+      // Allocate 20% of total delay for withdrawals
+      const withdrawDelayPortion = Math.floor(delayMs * 0.2);
+      const withdrawDelays = generateRandomDelays(withdrawDelayPortion, numChunks - 1);
       
-      // Create ONE temp keypair for the connected wallet's encryption service
-      // This MUST be reused for both deposit AND withdraw from the same wallet!
-      const mainTempKeypair = Keypair.generate();
-      const mainPrivacyCashClient = new PrivacyCash({
-        RPC_url: getRpcUrl(),
-        owner: mainTempKeypair,
-        enableDebug: false,
-      }) as any;
-      
-      // Override publicKey to use wallet's public key (same as pc/tx page does)
-      mainPrivacyCashClient.publicKey = publicKey;
-      
-      // Wallet signer for main wallet operations
-      const walletSigner = async (tx: VersionedTransaction) => {
-        const signedTx = await signTransaction(tx);
-        return signedTx;
-      };
-
-      // Step 3: Deposit to pool from connected wallet
-      updateStep(3, 'running', 'Depositing to pool (please sign in your wallet)...');
-      
-      try {
-        const depositResult = await deposit({
-          lightWasm,
-          amount_in_lamports: amountLamports,
-          connection: connection,
-          encryptionService: mainPrivacyCashClient.encryptionService, // SAME encryption service
-          publicKey: publicKey,
-          transactionSigner: walletSigner,
-          keyBasePath: '/circuit2/transaction2',
-          storage: getBrowserStorage(),
-        });
-        
-        signatures.push(depositResult.tx);
-        updateStep(3, 'completed', 'Deposit complete');
-        
-      } catch (err: any) {
-        console.error('Deposit error:', err);
-        throw new Error(`Deposit failed: ${err.message}`);
-      }
-
-      // Step 4: Wait for indexing
-      updateStep(4, 'running', 'Waiting for UTXO indexing...');
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      updateStep(4, 'completed', 'Deposit indexed');
-
-      // Step 5: Privacy delay
-      if (delayMs > 0) {
-        updateStep(5, 'running', `Privacy delay: ${formatTime(delayMs)}`);
-        await sleepWithCountdown(delayMs, (remaining) => {
-          updateStep(5, 'running', `Waiting ${remaining}...`);
-        });
-        updateStep(5, 'completed', 'Privacy delay complete');
-      } else {
-        updateStep(5, 'completed', 'No delay (fast mode)');
-      }
-
-      // Step 6: Withdraw from pool to burner keypairs
-      // Use the SAME encryption service as deposit!
-      updateStep(6, 'running', 'Withdrawing to burner wallets...');
-      
-      // Use exact chunks if provided, otherwise equal split
-      let chunkAmounts: number[];
-      if (exactChunks && exactChunks.length === numChunks) {
-        chunkAmounts = exactChunks;
-        console.log('[useWalletPrivateSend] Using exact chunks:', chunkAmounts.map(c => c / LAMPORTS_PER_SOL));
-      } else {
-        const chunkAmount = Math.floor(amountLamports / numChunks);
-        const remainder = amountLamports % numChunks;
-        chunkAmounts = Array.from({ length: numChunks }, (_, i) => 
-          i === numChunks - 1 ? chunkAmount + remainder : chunkAmount
-        );
-        console.log('[useWalletPrivateSend] Using equal split:', chunkAmounts.map(c => c / LAMPORTS_PER_SOL));
-      }
-      
+      // Use same chunk amounts as deposited
       try {
         for (let i = 0; i < numChunks; i++) {
           const burnerKeypair = burnerKeypairs[i];
           const withdrawAmount = chunkAmounts[i];
           
-          updateStep(6, 'running', `Withdrawing chunk ${i + 1}/${numChunks}...`);
+          updateStep(8, 'running', `Withdrawing chunk ${i + 1}/${numChunks}...`);
           
           const withdrawResult = await withdraw({
             lightWasm,
             amount_in_lamports: withdrawAmount,
             connection: connection,
-            encryptionService: mainPrivacyCashClient.encryptionService, // SAME encryption service!
-            publicKey: publicKey,
+            encryptionService: firstBurnerClient.encryptionService, // First burner's encryption service
+            publicKey: firstBurnerKeypair.publicKey,
             recipient: burnerKeypair.publicKey,
             keyBasePath: '/circuit2/transaction2',
             storage: getBrowserStorage(),
@@ -297,15 +379,23 @@ export function useWalletPrivateSend() {
           
           // Wait for transaction confirmation
           await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          // Random delay before next withdrawal (except for last)
+          if (i < numChunks - 1 && withdrawDelays[i] > 0) {
+            updateStep(8, 'running', `Waiting ${formatTime(withdrawDelays[i])} before next withdrawal...`);
+            await sleepWithCountdown(withdrawDelays[i], (remaining) => {
+              updateStep(8, 'running', `Waiting ${remaining} before next withdrawal...`);
+            });
+          }
         }
         
-        updateStep(6, 'completed', 'Withdrawn to all burners');
+        updateStep(8, 'completed', 'Withdrawn to all burners');
         
       } catch (err: any) {
         throw new Error(`Withdrawal to burners failed: ${err.message}`);
       }
 
-      // Step 7: Re-deposit from burners to pool
+      // Step 9: Re-deposit from burners to pool
       // Each burner has its OWN encryption service (different keypair)
       updateStep(7, 'running', 'Re-depositing from burners...');
       
@@ -328,7 +418,7 @@ export function useWalletPrivateSend() {
           const burnerKeypair = burnerKeypairs[i];
           const burnerClient = burnerClients[i];
           
-          updateStep(7, 'running', `Checking burner ${i + 1} balance...`);
+          updateStep(9, 'running', `Checking burner ${i + 1} balance...`);
           
           // Get ACTUAL balance of burner (after withdrawal fees)
           const burnerBalance = await burnerConnection.getBalance(burnerKeypair.publicKey);
@@ -342,7 +432,7 @@ export function useWalletPrivateSend() {
             continue; // Skip this burner
           }
           
-          updateStep(7, 'running', `Re-depositing ${(depositAmount / LAMPORTS_PER_SOL).toFixed(4)} SOL from burner ${i + 1}/${numChunks}...`);
+          updateStep(9, 'running', `Re-depositing ${(depositAmount / LAMPORTS_PER_SOL).toFixed(4)} SOL from burner ${i + 1}/${numChunks}...`);
           
           const burnerSigner = async (tx: VersionedTransaction) => {
             tx.sign([burnerKeypair]);
@@ -366,15 +456,19 @@ export function useWalletPrivateSend() {
           await new Promise(resolve => setTimeout(resolve, 8000));
         }
         
-        updateStep(7, 'completed', 'All burners re-deposited');
+        updateStep(9, 'completed', 'All burners re-deposited');
         
       } catch (err: any) {
         throw new Error(`Re-deposit from burners failed: ${err.message}`);
       }
 
-      // Step 8: Final withdrawal to destination
+      // Step 10: Final withdrawal to destination with random delays
       // Use each burner's encryption service to withdraw MAX available
-      updateStep(8, 'running', 'Final withdrawal to destination...');
+      updateStep(10, 'running', 'Final withdrawal to destination...');
+      
+      // Allocate 20% of total delay for final withdrawals
+      const finalDelayPortion = Math.floor(delayMs * 0.2);
+      const finalDelays = generateRandomDelays(finalDelayPortion, numChunks - 1);
       
       // Import getUtxos to check private balance
       const { getUtxos } = await import('privacycash/utils');
@@ -386,7 +480,7 @@ export function useWalletPrivateSend() {
           const burnerKeypair = burnerKeypairs[i];
           const burnerClient = burnerClients[i];
           
-          updateStep(8, 'running', `Checking burner ${i + 1} private balance...`);
+          updateStep(10, 'running', `Checking burner ${i + 1} private balance...`);
           
           // Get actual UTXOs/private balance for this burner
           const utxos = await getUtxos({
@@ -406,7 +500,7 @@ export function useWalletPrivateSend() {
             continue;
           }
           
-          updateStep(8, 'running', `Final withdraw ${(totalPrivateBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL from burner ${i + 1}/${numChunks}...`);
+          updateStep(10, 'running', `Final withdraw ${(totalPrivateBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL from burner ${i + 1}/${numChunks}...`);
           
           const withdrawResult = await withdraw({
             lightWasm,
@@ -423,9 +517,17 @@ export function useWalletPrivateSend() {
           
           // Wait for confirmation
           await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          // Random delay before next withdrawal (except for last)
+          if (i < numChunks - 1 && finalDelays[i] > 0) {
+            updateStep(10, 'running', `Waiting ${formatTime(finalDelays[i])} before next withdrawal...`);
+            await sleepWithCountdown(finalDelays[i], (remaining) => {
+              updateStep(10, 'running', `Waiting ${remaining} before next withdrawal...`);
+            });
+          }
         }
         
-        updateStep(8, 'completed', 'Complete!');
+        updateStep(10, 'completed', 'Complete!');
         
       } catch (err: any) {
         throw new Error(`Final withdrawal failed: ${err.message}`);

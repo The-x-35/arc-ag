@@ -16,7 +16,6 @@ import {
   withdrawFromPool,
   isValidPrivateKey,
   isValidSolanaAddress,
-  calculateDelayMs,
   sleepWithCountdown,
   formatTime,
 } from '@/lib/swig/utils';
@@ -26,6 +25,7 @@ export interface SwigPrivateSendParams {
   destination: string;
   amount: number;
   numChunks: number;
+  delayMinutes: number;
   sponsorFees: boolean;
 }
 
@@ -78,7 +78,7 @@ export function useSwigPrivateSend() {
   }, []);
 
   const execute = useCallback(async (params: SwigPrivateSendParams) => {
-    const { privateKey, destination, amount, numChunks, sponsorFees } = params;
+    const { privateKey, destination, amount, numChunks, delayMinutes, sponsorFees } = params;
     
     // Initialize steps
     setSteps(STEPS.map(s => ({ ...s, status: 'pending' as const })));
@@ -90,7 +90,7 @@ export function useSwigPrivateSend() {
     const connection = new Connection(getRpcUrl(), 'confirmed');
     const formattedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
     const amountLamports = Math.floor(amount * LAMPORTS_PER_SOL);
-    const delayMs = calculateDelayMs(numChunks);
+    const delayMs = delayMinutes * 60 * 1000; // Convert minutes to milliseconds
     const signatures: string[] = [];
     const generatedBurners: BurnerWalletInfo[] = [];
 

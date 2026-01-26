@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { BurnerType } from '@/types';
 import { AvailableAmount, ExactSplitResult } from '@/lib/indexer/transaction-indexer';
+import { formatTime } from '@/lib/swig/utils';
 
 export interface SplitPreview {
   loading: boolean;
@@ -18,6 +19,7 @@ interface SendFormProps {
   destination: string;
   amount: string;
   privacyLevel: number;
+  delayMinutes: number;
   burnerType: BurnerType;
   sponsorFees: boolean;
   splitPreview: SplitPreview;
@@ -26,6 +28,7 @@ interface SendFormProps {
   onDestinationChange: (value: string) => void;
   onAmountChange: (value: string) => void;
   onPrivacyLevelChange: (value: number) => void;
+  onDelayChange: (value: number) => void;
   onBurnerTypeChange: (value: BurnerType) => void;
   onSponsorFeesChange: (value: boolean) => void;
   onSelectSuggestion: (sol: number) => void;
@@ -39,10 +42,12 @@ export default function SendForm({
   destination,
   amount,
   privacyLevel,
+  delayMinutes,
   splitPreview,
   onDestinationChange,
   onAmountChange,
   onPrivacyLevelChange,
+  onDelayChange,
   onSelectSuggestion,
   onSubmit,
   loading,
@@ -170,6 +175,36 @@ export default function SendForm({
           marginTop: '4px'
         }}>
           More chunks = more privacy, but higher fees
+        </div>
+      </div>
+
+      {/* Privacy Delay Slider */}
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ color: '#fff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+          Privacy Delay: {delayMinutes === 0 ? 'No delay (fast mode)' : formatTime(delayMinutes * 60 * 1000)}
+        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '12px', color: '#888' }}>0min</span>
+          <input
+            type="range"
+            min={0}
+            max={240}
+            step={5}
+            value={delayMinutes}
+            onChange={(e) => onDelayChange(parseInt(e.target.value))}
+            disabled={loading}
+            style={{ flex: 1 }}
+          />
+          <span style={{ fontSize: '12px', color: '#888' }}>4h</span>
+        </div>
+        <div style={{ 
+          fontSize: '11px', 
+          color: '#666',
+          marginTop: '4px'
+        }}>
+          {delayMinutes === 0 
+            ? 'No delay - fastest transaction' 
+            : 'Longer delay = more privacy, slower transaction'}
         </div>
       </div>
 
