@@ -151,6 +151,55 @@ export async function ensureSwigWalletExists(
 }
 
 /**
+ * Get full Swig wallet info including addresses (requires swig to exist)
+ */
+export async function getSwigWalletInfo(
+  connection: Connection,
+  evmPrivateKey: string
+): Promise<{
+  swigAddress: PublicKey;
+  walletAddress: PublicKey;
+  swigId: Uint8Array;
+  evmAccount: ReturnType<typeof privateKeyToAccount>;
+  swig: any;
+}> {
+  const { swigId, evmAccount } = getSwigBasicInfo(evmPrivateKey);
+  const swigAddress = await findSwigPda(swigId);
+  const swig = await fetchSwig(connection, swigAddress);
+  const walletAddress = await getSwigSystemAddress(swig);
+  return { swigAddress, walletAddress, swigId, evmAccount, swig };
+}
+
+/**
+ * Deposit to Privacy Cash pool using Swig wallet
+ */
+export async function depositToPoolWithSwig(
+  connection: Connection,
+  swig: any,
+  walletAddress: PublicKey,
+  amountLamports: number,
+  evmPrivateKey: string,
+  tempIndex: number,
+  updateStatus?: (msg: string) => void
+): Promise<string> {
+  throw new Error('depositToPoolWithSwig not implemented - Swig mode is disabled');
+}
+
+/**
+ * Withdraw from Privacy Cash pool using Swig wallet
+ */
+export async function withdrawFromPool(
+  connection: Connection,
+  amountLamports: number,
+  recipient: PublicKey,
+  evmPrivateKey: string,
+  tempIndex: number,
+  updateStatus?: (msg: string) => void
+): Promise<string> {
+  throw new Error('withdrawFromPool not implemented - Swig mode is disabled');
+}
+
+/**
  * Create multiple Swig burner wallets
  */
 export async function createSwigBurners(

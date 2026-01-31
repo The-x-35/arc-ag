@@ -227,8 +227,17 @@ export async function getHistoricalAmountsFromAccount(
         const postBalances = tx.meta.postBalances || [];
         
         // Find the escrow account index
+        const escrowAccountStr = escrowAccount.toBase58();
         const accountIndex = tx.transaction.message.accountKeys.findIndex(
-          key => key.equals(escrowAccount)
+          key => {
+            if (typeof key === 'string') {
+              return key === escrowAccountStr;
+            }
+            if (key instanceof PublicKey) {
+              return key.equals(escrowAccount);
+            }
+            return false;
+          }
         );
         
         if (accountIndex >= 0 && accountIndex < preBalances.length) {

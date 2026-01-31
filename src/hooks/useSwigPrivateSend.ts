@@ -14,6 +14,8 @@ import {
   deriveBurnerPrivateKey,
   depositToPoolWithSwig,
   withdrawFromPool,
+} from '@/lib/wallets/swig-burner';
+import {
   isValidPrivateKey,
   isValidSolanaAddress,
   sleepWithCountdown,
@@ -114,10 +116,9 @@ export function useSwigPrivateSend() {
       updateStep(2, 'running', 'Setting up main Swig wallet...');
       
       const mainBasic = getSwigBasicInfo(formattedKey);
-      const mainSwigAddress = await findSwigPda(mainBasic.swigId);
       
       await ensureSwigWalletExists(
-        connection, formattedKey, mainBasic.swigId, mainSwigAddress,
+        connection, formattedKey, sponsorFees,
         (msg) => updateStep(2, 'running', msg)
       );
       
@@ -173,11 +174,8 @@ export function useSwigPrivateSend() {
       
       for (let i = 1; i <= numChunks; i++) {
         const burnerKey = await deriveBurnerPrivateKey(formattedKey, i);
-        const burnerBasic = getSwigBasicInfo(burnerKey);
-        const burnerSwigAddress = await findSwigPda(burnerBasic.swigId);
-        
         await ensureSwigWalletExists(
-          connection, burnerKey, burnerBasic.swigId, burnerSwigAddress,
+          connection, burnerKey, sponsorFees,
           (msg) => updateStep(6, 'running', `Burner ${i}: ${msg}`)
         );
         
