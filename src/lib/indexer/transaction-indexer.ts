@@ -43,6 +43,18 @@ export interface ExactSplitResult {
   suggestion?: string; // Suggested amount if invalid
 }
 
+/**
+ * Withdrawal plan result
+ * Used for final burner withdrawals: match historical amounts, plus optional remainder
+ */
+export interface WithdrawalPlan {
+  valid: boolean;
+  historicalChunks: AvailableAmount[];
+  remainderLamports: number;
+  remainderSol: number;
+  error?: string;
+}
+
 // Minimum amount per chunk (accounts for 0.02 SOL min deposit + fees)
 export const MIN_CHUNK_LAMPORTS = 0.035 * LAMPORTS_PER_SOL; // 0.035 SOL minimum per chunk
 
@@ -71,16 +83,23 @@ export class TransactionIndexer {
   
   /**
    * Index all registered pools and aggregate historical amounts
+   * @param connection Solana connection
+   * @param limit Maximum number of transactions to index per pool
+   * @param poolIds Optional: filter to only these pool IDs. If not provided, uses all pools.
    */
   async indexAllPools(
     connection: Connection,
-    limit: number = 100
+    limit: number = 100,
+    poolIds?: string[]
   ): Promise<IndexedData> {
     const allAmounts: HistoricalAmount[] = [];
     const poolBreakdown = new Map<string, number>();
     let totalTransactions = 0;
     
-    const pools = poolRegistry.getAll();
+    const allPools = poolRegistry.getAll();
+    const pools = poolIds 
+      ? allPools.filter(p => poolIds.includes(p.id))
+      : allPools;
     
     for (const pool of pools) {
       const cacheKey = `${pool.id}-${limit}`;
@@ -245,9 +264,14 @@ export class TransactionIndexer {
    * Get available amounts for exact matching
    * Combines historical amounts with common "round" amounts
    * Returns amounts sorted by frequency (most common first)
+   * @param poolIds Optional: filter to only these pool IDs
    */
-  async getAvailableAmounts(connection: Connection, limit: number = 100): Promise<AvailableAmount[]> {
-    const indexed = await this.indexAllPools(connection, limit);
+  async getAvailableAmounts(
+    connection: Connection, 
+    limit: number = 100,
+    poolIds?: string[]
+  ): Promise<AvailableAmount[]> {
+    const indexed = await this.indexAllPools(connection, limit, poolIds);
     const availableMap = new Map<number, AvailableAmount>();
     
     // Add historical amounts
@@ -294,13 +318,15 @@ export class TransactionIndexer {
   /**
    * Find EXACT split for a given total amount
    * Only uses exact amounts from available pool - no approximation!
+   * @param poolIds Optional: filter to only these pool IDs
    */
   async findExactSplit(
     connection: Connection,
     totalLamports: number,
-    numChunks: number
+    numChunks: number,
+    poolIds?: string[]
   ): Promise<ExactSplitResult> {
-    const available = await this.getAvailableAmounts(connection, 100);
+    const available = await this.getAvailableAmounts(connection, 100, poolIds);
     
     // Filter to amounts that fit
     const validAmounts = available.filter(a => 
@@ -316,6 +342,51 @@ export class TransactionIndexer {
         error: `No valid amounts available. Minimum per chunk is ${MIN_CHUNK_LAMPORTS / LAMPORTS_PER_SOL} SOL`,
       };
     }
+    
+    // Special case: Check if total is exactly chunk × numChunks for any valid chunk amount
+    // This handles the case where user clicks on a popular amount button
+    // Calculate expected chunk amount (may have rounding)
+    const expectedChunkLamports = Math.floor(totalLamports / numChunks);
+    const remainder = totalLamports % numChunks;
+    
+    // Try to find a chunk amount that, when multiplied by numChunks, equals totalLamports
+    // First, try exact match
+    let matchingChunk = validAmounts.find(a => a.lamports * numChunks === totalLamports);
+    
+    // If not found, try with the expected chunk amount (allowing small rounding)
+    if (!matchingChunk) {
+      // Try exact expected chunk amount
+      matchingChunk = validAmounts.find(a => a.lamports === expectedChunkLamports);
+      
+      // If still not found, try with tolerance (allow up to remainder + small rounding)
+      if (!matchingChunk) {
+        matchingChunk = validAmounts.find(a => {
+          const diff = Math.abs(a.lamports - expectedChunkLamports);
+          // Allow up to remainder + small rounding (1000 lamports)
+          return diff <= remainder + 1000;
+        });
+      }
+    }
+    
+    if (matchingChunk) {
+      // Use this chunk amount repeated numChunks times
+      const chunks = Array(numChunks).fill(matchingChunk);
+      const actualTotal = matchingChunk.lamports * numChunks;
+      
+      // Verify it's close enough (handle rounding - allow up to 1000 lamports difference)
+      if (Math.abs(actualTotal - totalLamports) <= 1000) {
+        return {
+          valid: true,
+          chunks,
+          totalLamports: actualTotal,
+          totalSol: actualTotal / LAMPORTS_PER_SOL,
+        };
+      }
+    }
+    
+    // Also check if we can use any combination of two amounts that sum to total
+    // This handles cases like 0.038 + 0.038 = 0.076 even if the special case above didn't catch it
+    // We'll let the backtracking algorithm handle this, but ensure it can find equal splits
     
     // Try to find exact combination using greedy approach with backtracking
     const result = this.findExactCombination(validAmounts, totalLamports, numChunks);
@@ -368,11 +439,13 @@ export class TransactionIndexer {
       };
     }
     
-    // Use backtracking to find combinations with different amounts
+    // Use backtracking to find combinations
+    // First, try to find combinations with different amounts (better privacy)
+    // If that fails, allow same amounts to be used multiple times
     const chunks: AvailableAmount[] = [];
     const usedAmounts = new Set<number>();
     
-    const findCombination = (currentSum: number, depth: number): boolean => {
+    const findCombination = (currentSum: number, depth: number, allowRepeats: boolean = false): boolean => {
       if (depth === numChunks) {
         return currentSum === targetLamports;
       }
@@ -393,12 +466,13 @@ export class TransactionIndexer {
           continue;
         }
         
-        // Prefer different amounts (better privacy)
+        // Check if this amount has been used
         const isNewAmount = !usedAmounts.has(amt.lamports);
         
-        // For early chunks, prefer new amounts; for later chunks, allow repeats if needed
-        if (depth < numChunks - 2 && !isNewAmount) {
-          continue; // Early chunks should be different
+        // If not allowing repeats and this amount was already used, skip it
+        // Exception: for the last chunk, always allow repeats if needed to reach target
+        if (!allowRepeats && !isNewAmount && depth < numChunks - 1) {
+          continue;
         }
         
         chunks.push(amt);
@@ -406,7 +480,8 @@ export class TransactionIndexer {
           usedAmounts.add(amt.lamports);
         }
         
-        if (findCombination(currentSum + amt.lamports, depth + 1)) {
+        // Try with current allowRepeats setting
+        if (findCombination(currentSum + amt.lamports, depth + 1, allowRepeats)) {
           return true;
         }
         
@@ -420,13 +495,28 @@ export class TransactionIndexer {
       return false;
     };
     
-    if (findCombination(0, 0)) {
-      // Verify total matches exactly
+    // First try without allowing repeats (better privacy)
+    if (findCombination(0, 0, false)) {
       const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
       if (total === targetLamports) {
         return {
           valid: true,
-          chunks,
+          chunks: [...chunks],
+          totalLamports: targetLamports,
+          totalSol: targetLamports / LAMPORTS_PER_SOL,
+        };
+      }
+    }
+    
+    // If that didn't work, try again allowing repeats (for cases like 0.038 + 0.038 = 0.076)
+    chunks.length = 0;
+    usedAmounts.clear();
+    if (findCombination(0, 0, true)) {
+      const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
+      if (total === targetLamports) {
+        return {
+          valid: true,
+          chunks: [...chunks],
           totalLamports: targetLamports,
           totalSol: targetLamports / LAMPORTS_PER_SOL,
         };
@@ -479,13 +569,15 @@ export class TransactionIndexer {
    * Get suggested amounts based on user's target
    * Returns list of valid totals with DIFFERENT chunk amounts for better privacy
    * Each suggestion is verified to have a valid exact split
+   * @param poolIds Optional: filter to only these pool IDs
    */
   async getSuggestedAmounts(
     connection: Connection,
     targetLamports: number,
-    numChunks: number
+    numChunks: number,
+    poolIds?: string[]
   ): Promise<{ amount: number; sol: number; chunks: number[] }[]> {
-    const available = await this.getAvailableAmounts(connection, 100);
+    const available = await this.getAvailableAmounts(connection, 100, poolIds);
     const suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
     
     // Get valid amounts (only use amounts that actually exist in historical data)
@@ -566,6 +658,166 @@ export class TransactionIndexer {
     }
     
     return Array.from(unique.values()).slice(0, 6);
+  }
+
+  /**
+   * Compute withdrawal chunks based on indexed historical amounts.
+   * - Tries 2–3 total chunks (historical + optional remainder)
+   * - Strictly avoids any amounts in excludedAmounts
+   * - Ensures every chunk (including remainder) >= MIN_CHUNK_LAMPORTS
+   * - Prefers combinations that maximize historical coverage (smallest remainder)
+   */
+  async findWithdrawalSplit(
+    connection: Connection,
+    totalLamports: number,
+    options: { minChunks: number; maxChunks: number },
+    excludedAmounts: number[] = [],
+    poolIds?: string[]
+  ): Promise<WithdrawalPlan> {
+    const { minChunks, maxChunks } = options;
+    if (minChunks < 1 || maxChunks < minChunks) {
+      throw new Error('Invalid withdrawal split options');
+    }
+
+    if (totalLamports < MIN_CHUNK_LAMPORTS) {
+      return {
+        valid: false,
+        historicalChunks: [],
+        remainderLamports: 0,
+        remainderSol: 0,
+        error: `Total withdrawal amount must be at least ${MIN_CHUNK_LAMPORTS / LAMPORTS_PER_SOL} SOL`,
+      };
+    }
+
+    const available = await this.getAvailableAmounts(connection, 100, poolIds);
+
+    // Filter to usable amounts: above minimum, <= total, and not excluded
+    const excludedSet = new Set(excludedAmounts);
+    const candidates = available.filter(a =>
+      a.lamports >= MIN_CHUNK_LAMPORTS &&
+      a.lamports <= totalLamports &&
+      !excludedSet.has(a.lamports)
+    );
+
+    if (candidates.length === 0) {
+      // No historical amounts available, fall back to single-chunk withdrawal if allowed
+      if (totalLamports >= MIN_CHUNK_LAMPORTS && minChunks <= 1) {
+        return {
+          valid: true,
+          historicalChunks: [],
+          remainderLamports: totalLamports,
+          remainderSol: totalLamports / LAMPORTS_PER_SOL,
+        };
+      }
+      return {
+        valid: false,
+        historicalChunks: [],
+        remainderLamports: 0,
+        remainderSol: 0,
+        error: 'No valid historical amounts available for withdrawal split',
+      };
+    }
+
+    // Sort candidates by frequency (most common first), then by amount descending
+    candidates.sort((a, b) => {
+      if (b.frequency !== a.frequency) return b.frequency - a.frequency;
+      return b.lamports - a.lamports;
+    });
+
+    let bestPlan: WithdrawalPlan | null = null;
+
+    // Try total chunk counts 2 then 3 (or according to options)
+    const totalChunkTargets: number[] = [];
+    for (let k = minChunks; k <= maxChunks; k++) totalChunkTargets.push(k);
+
+    for (const desiredTotalChunks of totalChunkTargets) {
+      // We will pick historicalChunksCount in {desiredTotalChunks, desiredTotalChunks - 1}
+      const histCounts = new Set<number>([
+        desiredTotalChunks,
+        Math.max(1, desiredTotalChunks - 1),
+      ]);
+
+      for (const histCount of histCounts) {
+        // Backtracking over candidates to pick exactly histCount chunks
+        const current: AvailableAmount[] = [];
+
+        const backtrack = (startIndex: number, depth: number, sum: number) => {
+          if (depth === histCount) {
+            if (sum > totalLamports) return;
+
+            const remainder = totalLamports - sum;
+            const remainderChunkCount = remainder >= MIN_CHUNK_LAMPORTS ? 1 : 0;
+            const totalChunks = depth + remainderChunkCount;
+
+            // Must match desiredTotalChunks exactly
+            if (totalChunks !== desiredTotalChunks) return;
+
+            // If we have a remainder, ensure it's >= MIN_CHUNK_LAMPORTS (already checked)
+            const plan: WithdrawalPlan = {
+              valid: true,
+              historicalChunks: [...current],
+              remainderLamports: remainderChunkCount ? remainder : 0,
+              remainderSol: remainderChunkCount ? remainder / LAMPORTS_PER_SOL : 0,
+            };
+
+            // Choose the plan that minimizes remainder, then uses more historical coverage
+            if (!bestPlan) {
+              bestPlan = plan;
+            } else {
+              const bestR = bestPlan.remainderLamports;
+              const newR = plan.remainderLamports;
+              if (
+                newR < bestR ||
+                (newR === bestR &&
+                  sum > bestPlan.historicalChunks.reduce((acc, c) => acc + c.lamports, 0))
+              ) {
+                bestPlan = plan;
+              }
+            }
+            return;
+          }
+
+          // Simple pruning
+          if (sum >= totalLamports) return;
+
+          for (let i = startIndex; i < candidates.length; i++) {
+            const amt = candidates[i];
+            if (amt.lamports < MIN_CHUNK_LAMPORTS) continue;
+            const newSum = sum + amt.lamports;
+            if (newSum > totalLamports) continue;
+
+            current.push(amt);
+            // Allow reuse of same amount; use i instead of i+1
+            backtrack(i, depth + 1, newSum);
+            current.pop();
+          }
+        };
+
+        backtrack(0, 0, 0);
+      }
+    }
+
+    if (bestPlan) {
+      return bestPlan;
+    }
+
+    // Fallback: if no 2–3 chunk plan, but total itself is >= minimum, allow single remainder chunk
+    if (totalLamports >= MIN_CHUNK_LAMPORTS && minChunks <= 1) {
+      return {
+        valid: true,
+        historicalChunks: [],
+        remainderLamports: totalLamports,
+        remainderSol: totalLamports / LAMPORTS_PER_SOL,
+      };
+    }
+
+    return {
+      valid: false,
+      historicalChunks: [],
+      remainderLamports: 0,
+      remainderSol: 0,
+      error: 'Could not find a valid 2–3 chunk withdrawal split respecting minimum amount and exclusions',
+    };
   }
 }
 

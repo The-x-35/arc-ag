@@ -56,13 +56,21 @@ export default function SendForm({
   
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loading && splitPreview?.result?.valid) {
+    const amountNum = parseFloat(amount);
+    const minAmount = (0.035 * privacyLevel); // MIN_CHUNK_LAMPORTS per chunk
+    const meetsMinimum = amountNum >= minAmount;
+    
+    // STRICT minimum check - block if below minimum
+    if (!loading && connected && destination && amount && meetsMinimum) {
       onSubmit();
     }
   };
 
-  // Form is valid only if we have an exact split
-  const isFormValid = connected && destination && amount && splitPreview?.result?.valid;
+  // Form is valid if we have amount, destination, wallet, and STRICTLY meet minimum
+  const amountNum = parseFloat(amount) || 0;
+  const minAmount = (0.035 * privacyLevel); // MIN_CHUNK_LAMPORTS per chunk
+  const meetsMinimum = amountNum >= minAmount;
+  const isFormValid = connected && destination && amount && meetsMinimum;
 
   return (
     <form onSubmit={handleSubmit}>
@@ -312,9 +320,9 @@ export default function SendForm({
           ) : splitPreview?.result?.error ? (
             <div style={{ 
               padding: '12px',
-              background: '#1a0000',
+              background: meetsMinimum ? '#2a1a00' : '#1a0000',
               borderRadius: '8px',
-              border: '1px solid #3a0a0a'
+              border: `1px solid ${meetsMinimum ? '#5a3a00' : '#3a0a0a'}`
             }}>
               <div style={{ 
                 display: 'flex', 
@@ -322,11 +330,47 @@ export default function SendForm({
                 gap: '8px',
                 marginBottom: '8px'
               }}>
-                <span style={{ color: '#ef4444', fontSize: '16px' }}>✗</span>
-                <span style={{ color: '#ef4444', fontSize: '13px' }}>
+                <span style={{ color: meetsMinimum ? '#f59e0b' : '#ef4444', fontSize: '16px' }}>
+                  {meetsMinimum ? '⚠' : '✗'}
+                </span>
+                <span style={{ color: meetsMinimum ? '#f59e0b' : '#ef4444', fontSize: '13px' }}>
                   {splitPreview.result.error}
                 </span>
               </div>
+              
+              {!meetsMinimum && (
+                <div style={{ 
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: '#2a0000',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#ef4444'
+                }}>
+                  ⚠ Amount below recommended minimum ({minAmount.toFixed(3)} SOL for {privacyLevel} chunks)
+                  <br />
+                  <span style={{ color: '#888', fontSize: '11px' }}>
+                    Each chunk will be {(amountNum / privacyLevel).toFixed(6)} SOL (minimum recommended: 0.035 SOL per chunk)
+                  </span>
+                </div>
+              )}
+              
+              {meetsMinimum && (
+                <div style={{ 
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: '#1a0a00',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#f59e0b'
+                }}>
+                  ⚠ Custom amount: Will split equally into {privacyLevel} chunks of {(amountNum / privacyLevel).toFixed(6)} SOL each
+                  <br />
+                  <span style={{ color: '#888', fontSize: '11px' }}>
+                    This may reduce privacy compared to using exact historical amounts
+                  </span>
+                </div>
+              )}
               
               {splitPreview?.suggestions && splitPreview.suggestions.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
@@ -418,7 +462,7 @@ export default function SendForm({
           cursor: loading || !isFormValid ? 'not-allowed' : 'pointer'
         }}
       >
-        {loading ? 'Processing...' : splitPreview?.result?.valid ? `Send ${splitPreview.result.totalSol} SOL Privately` : 'Enter valid amount'}
+        {loading ? 'Processing...' : splitPreview?.result?.valid ? `Send ${splitPreview.result.totalSol} SOL Privately` : meetsMinimum ? `Send ${amountNum.toFixed(6)} SOL (Custom Split)` : 'Enter valid amount'}
       </button>
 
       {/* Flow info */}
@@ -436,7 +480,9 @@ export default function SendForm({
         <br />
         2. Each chunk withdrawn to a separate burner wallet
         <br />
-        3. Burners re-deposit and withdraw to destination
+        3. Burners re-deposit to pool (UTXOs belong to final burner)
+        <br />
+        4. Final burner withdraws all funds and sends to destination
         <br />
         <span style={{ color: '#f59e0b' }}>Using exact historical amounts maximizes privacy!</span>
       </div>

@@ -8,13 +8,15 @@ import { useWalletPrivateSend } from '@/hooks/useWalletPrivateSend';
 import { BurnerType } from '@/types';
 import { poolRegistry } from '@/lib/pools/registry';
 import { privacyCashPool } from '@/lib/pools/privacy-cash';
+import { shadowPayPool } from '@/lib/pools/shadowpay';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getSolanaRpc } from '@/lib/config/networks';
 import { transactionIndexer, AvailableAmount, ExactSplitResult } from '@/lib/indexer/transaction-indexer';
 
-// Ensure pool is registered
+// Ensure pools are registered
 if (poolRegistry.isEmpty()) {
   poolRegistry.register(privacyCashPool);
+  poolRegistry.register(shadowPayPool);
 }
 
 // Flow step definitions for EOA mode
@@ -26,9 +28,12 @@ const EOA_FLOW_STEPS = [
   { id: 5, label: 'Wait for Indexing', description: 'Wait for UTXO to be indexed' },
   { id: 6, label: 'Privacy Delay', description: 'Remaining privacy delay' },
   { id: 7, label: 'Generate Burner Keypairs', description: 'Create additional burner wallets' },
-  { id: 8, label: 'Withdraw to Burners', description: 'Withdraw with random delays' },
-  { id: 9, label: 'Re-deposit from Burners', description: 'Burners deposit back to pool' },
-  { id: 10, label: 'Final Withdraw', description: 'Withdraw to destination with delays' },
+  { id: 8, label: 'Generate Final Burner', description: 'Create final burner wallet for consolidation' },
+  { id: 9, label: 'Withdraw to Burners', description: 'Withdraw with random delays' },
+  { id: 10, label: 'Re-deposit from Burners', description: 'Burners deposit back to pool (UTXOs to final burner)' },
+  { id: 11, label: 'Wait for Indexing', description: 'Wait for re-deposit UTXOs to be indexed' },
+  { id: 12, label: 'Final Burner Withdraws', description: 'Final burner withdraws all funds from pool' },
+  { id: 13, label: 'Final Transfer', description: 'Final burner sends to destination' },
 ];
 
 export default function Home() {
@@ -130,13 +135,16 @@ export default function Home() {
       const connection = connectionRef.current || new Connection(getSolanaRpc('mainnet'), 'confirmed');
       const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
       
+      // Use selected pools (or all if none selected)
+      const poolsToUse = selectedPools.length > 0 ? selectedPools : undefined;
+      
       // Find exact split
-      const splitResult = await transactionIndexer.findExactSplit(connection, amountLamports, numChunks);
+      const splitResult = await transactionIndexer.findExactSplit(connection, amountLamports, numChunks, poolsToUse);
       
       // Get suggestions ONLY if split not valid
       let suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
       if (!splitResult.valid) {
-        suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks);
+        suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
       } else {
         // Clear suggestions when we have a valid split
         suggestions = [];
@@ -192,19 +200,30 @@ export default function Home() {
   };
 
   const handleSubmit = async () => {
-    if (!splitPreview.result?.valid) return;
+    const amountNum = parseFloat(amount);
+    const minAmount = 0.035 * privacyLevel; // MIN_CHUNK_LAMPORTS per chunk
+    if (amountNum < minAmount) return;
     
     try {
-      // Use the computed split amounts
-      const chunks = splitPreview.result.chunks.map(c => c.lamports);
+      let chunks: number[] | undefined;
+      let sendAmount = amountNum;
+      
+      // If we have a valid exact split, use it
+      if (splitPreview.result?.valid && splitPreview.result.chunks.length > 0) {
+        chunks = splitPreview.result.chunks.map(c => c.lamports);
+        sendAmount = splitPreview.result.totalSol;
+      }
+      // Otherwise, use equal split (custom amount)
+      // The hook will handle equal splitting if exactChunks is not provided
       
       await walletSend.execute({
         destination,
-        amount: splitPreview.result.totalSol,
+        amount: sendAmount,
         numChunks: privacyLevel,
         delayMinutes,
         sponsorFees,
-        exactChunks: chunks, // Pass exact chunk amounts
+        exactChunks: chunks, // Pass exact chunk amounts if available, undefined for equal split
+        selectedPools: selectedPools.length > 0 ? selectedPools : undefined, // Pass selected pools
       });
     } catch (err) {
       console.error('Send failed:', err);
@@ -354,7 +373,7 @@ export default function Home() {
             Transaction Flow
           </h3>
           <p style={{ color: '#888', fontSize: '12px', marginBottom: '16px' }}>
-            Wallet → First Burner → Pool (in chunks) → {privacyLevel} Burner EOAs → Pool → Destination
+            Wallet → First Burner → Pool (chunks) → {privacyLevel} Burner EOAs → Pool (UTXOs to Final Burner) → Final Burner → Destination
           </p>
 
           {/* Split Preview Summary */}
@@ -454,21 +473,67 @@ export default function Home() {
             }}>
               <div style={{ color: '#f55', fontWeight: '600', marginBottom: '4px' }}>Error</div>
               <p style={{ color: '#fff', fontSize: '13px' }}>{error}</p>
-              <button 
-                onClick={handleReset}
-                style={{
-                  marginTop: '12px',
-                  padding: '6px 12px',
-                  background: '#222',
-                  border: '1px solid #444',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-              >
-                Try Again
-              </button>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                {error.includes('Re-deposit') && (
+                  <button 
+                    onClick={async () => {
+                      // Retry just the re-deposit step by re-running from step 10
+                      // This is a workaround - ideally we'd have a resume function
+                      const amountNum = parseFloat(amount);
+                      const minAmount = 0.035 * privacyLevel;
+                      if (amountNum < minAmount) return;
+                      
+                      try {
+                        let chunks: number[] | undefined;
+                        let sendAmount = amountNum;
+                        if (splitPreview.result?.valid && splitPreview.result.chunks.length > 0) {
+                          chunks = splitPreview.result.chunks.map(c => c.lamports);
+                          sendAmount = splitPreview.result.totalSol;
+                        }
+                        
+                        // Re-execute - the hook will skip completed steps if we had burner wallets
+                        await walletSend.execute({
+                          destination,
+                          amount: sendAmount,
+                          numChunks: privacyLevel,
+                          delayMinutes,
+                          sponsorFees,
+                          exactChunks: chunks,
+                          selectedPools: selectedPools.length > 0 ? selectedPools : undefined,
+                        });
+                      } catch (err) {
+                        console.error('Retry failed:', err);
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#3b82f6',
+                      border: '1px solid #555',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '600'
+                    }}
+                  >
+                    Retry Re-deposit
+                  </button>
+                )}
+                <button 
+                  onClick={handleReset}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#222',
+                    border: '1px solid #444',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                >
+                  Start Over
+                </button>
+              </div>
             </div>
           )}
 
@@ -535,7 +600,7 @@ export default function Home() {
                     marginBottom: '8px'
                   }}>
                     <span style={{ fontWeight: '600', color: '#fff', fontSize: '13px' }}>
-                      {burner.index === 0 ? 'First Burner' : `Burner ${burner.index}`}
+                      {burner.index === 0 ? 'First Burner' : burner.index === -1 ? 'Final Burner' : `Burner ${burner.index}`}
                     </span>
                     <span style={{ 
                       padding: '2px 8px', 

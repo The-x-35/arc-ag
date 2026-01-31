@@ -32,6 +32,95 @@ export const getRpcUrl = () => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || cluster
 export const RPC_URL = getRpcUrl();
 
 /**
+ * Check if an error is due to block length exceeded
+ */
+export function isBlockLengthExceededError(error: any): boolean {
+  const errorMessage = error?.message || error?.toString() || '';
+  const errorLower = errorMessage.toLowerCase();
+  
+  return (
+    errorLower.includes('block length') ||
+    errorLower.includes('transaction too large') ||
+    errorLower.includes('transaction size') ||
+    errorLower.includes('exceeded') ||
+    errorLower.includes('max transaction size') ||
+    errorLower.includes('transaction exceeds') ||
+    error?.code === 0x1 || // Transaction too large error code
+    error?.code === -32002 // RPC error for transaction too large
+  );
+}
+
+/**
+ * Retry a transaction operation with error handling for block length exceeded
+ * If block length exceeded, will retry with smaller batches or skip
+ */
+export async function retryTransaction<T>(
+  operation: () => Promise<T>,
+  options: {
+    maxRetries?: number;
+    onRetry?: (attempt: number, error: any) => void;
+    onBlockLengthError?: (error: any) => Promise<T | null>; // Return null to skip
+    skipOnBlockLength?: boolean; // If true, skip operation on block length error
+  } = {}
+): Promise<T | null> {
+  const {
+    maxRetries = 3,
+    onRetry,
+    onBlockLengthError,
+    skipOnBlockLength = false,
+  } = options;
+  
+  let lastError: any;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check if it's a block length exceeded error
+      if (isBlockLengthExceededError(error)) {
+        console.warn(`[retryTransaction] Block length exceeded on attempt ${attempt + 1}`);
+        
+        // If skip is enabled, return null to skip
+        if (skipOnBlockLength) {
+          console.warn('[retryTransaction] Skipping transaction due to block length exceeded');
+          return null;
+        }
+        
+        // If custom handler provided, use it
+        if (onBlockLengthError) {
+          const result = await onBlockLengthError(error);
+          if (result !== null) {
+            return result;
+          }
+          // If handler returns null, continue to skip
+          console.warn('[retryTransaction] Handler returned null, skipping transaction');
+          return null;
+        }
+        
+        // Otherwise, skip this transaction
+        console.warn('[retryTransaction] Skipping transaction due to block length exceeded');
+        return null;
+      }
+      
+      // For other errors, retry if not last attempt
+      if (attempt < maxRetries - 1) {
+        if (onRetry) {
+          onRetry(attempt + 1, error);
+        }
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        continue;
+      }
+    }
+  }
+  
+  // If all retries failed and it's not a block length error, throw
+  throw lastError;
+}
+
+/**
  * Create deterministic Swig ID from EVM address
  */
 export function createDeterministicSwigId(evmAddress: string): Uint8Array {
@@ -48,45 +137,11 @@ export function createDeterministicSwigId(evmAddress: string): Uint8Array {
   }
   
   for (let i = 0; i < data.length; i++) {
-    hash[hashIndex] ^= data[data.length - 1 - i];
+    hash[hashIndex] ^= data[i] ^ 0xFF;
     hashIndex = (hashIndex + 1) % 32;
   }
   
   return hash;
-}
-
-/**
- * Derive burner ETH private key from main key by signing a unique message
- */
-export async function deriveBurnerPrivateKey(mainPrivateKey: string, index: number): Promise<string> {
-  const formattedKey = mainPrivateKey.startsWith('0x') ? mainPrivateKey : `0x${mainPrivateKey}`;
-  const account = privateKeyToAccount(formattedKey as `0x${string}`);
-  
-  const message = `swig_burner_wallet_${index}_${account.address}`;
-  const signature = await account.signMessage({ message });
-  const burnerKey = keccak256(toBytes(signature));
-  return burnerKey;
-}
-
-/**
- * Derive temp Solana keypair from ETH key (for Privacy Cash operations)
- */
-export async function deriveTempKeypair(evmPrivateKey: string, index: number): Promise<Keypair> {
-  const formattedKey = evmPrivateKey.startsWith('0x') ? evmPrivateKey : `0x${evmPrivateKey}`;
-  const account = privateKeyToAccount(formattedKey as `0x${string}`);
-  const message = `privacy_temp_${index}_${account.address}`;
-  const signature = await account.signMessage({ message });
-  const seed = keccak256(toBytes(signature));
-  const seedBytes = hexToBytes(seed);
-  return Keypair.fromSeed(seedBytes);
-}
-
-/**
- * Validate Ethereum private key
- */
-export function isValidPrivateKey(key: string): boolean {
-  const formatted = key.startsWith('0x') ? key : `0x${key}`;
-  return /^0x[a-fA-F0-9]{64}$/.test(formatted);
 }
 
 /**
@@ -102,303 +157,11 @@ export function isValidSolanaAddress(address: string): boolean {
 }
 
 /**
- * Get Swig wallet basic info from ETH private key
+ * Validate private key format
  */
-export function getSwigBasicInfo(evmPrivateKey: string): {
-  swigId: Uint8Array;
-  evmAccount: ReturnType<typeof privateKeyToAccount>;
-  formattedKey: string;
-} {
-  const formattedKey = evmPrivateKey.startsWith('0x') ? evmPrivateKey : `0x${evmPrivateKey}`;
-  const evmAccount = privateKeyToAccount(formattedKey as `0x${string}`);
-  const swigId = createDeterministicSwigId(evmAccount.address);
-  return { swigId, evmAccount, formattedKey };
-}
-
-/**
- * Get full Swig wallet info including addresses (requires swig to exist)
- */
-export async function getSwigWalletInfo(
-  connection: Connection,
-  evmPrivateKey: string
-): Promise<{
-  swigAddress: PublicKey;
-  walletAddress: PublicKey;
-  swigId: Uint8Array;
-  evmAccount: ReturnType<typeof privateKeyToAccount>;
-  swig: any;
-}> {
-  const { swigId, evmAccount } = getSwigBasicInfo(evmPrivateKey);
-  const swigAddress = await findSwigPda(swigId);
-  const swig = await fetchSwig(connection, swigAddress);
-  const walletAddress = await getSwigSystemAddress(swig);
-  return { swigAddress, walletAddress, swigId, evmAccount, swig };
-}
-
-/**
- * Check if Swig wallet exists, create if not
- */
-export async function ensureSwigWalletExists(
-  connection: Connection,
-  evmPrivateKey: string,
-  swigId: Uint8Array,
-  swigAddress: PublicKey,
-  updateStatus: (msg: string) => void
-): Promise<boolean> {
-  try {
-    await fetchSwig(connection, swigAddress);
-    return true;
-  } catch (error: any) {
-    updateStatus('Creating Swig wallet...');
-    
-    const formattedKey = evmPrivateKey.startsWith('0x') ? evmPrivateKey : `0x${evmPrivateKey}`;
-    const evmAccount = privateKeyToAccount(formattedKey as `0x${string}`);
-    const authorityInfo = createSecp256k1AuthorityInfo(evmAccount.publicKey);
-    const rootActions = Actions.set().all().get();
-    
-    const { blockhash } = await connection.getLatestBlockhash('confirmed');
-    
-    const createSwigInstruction = await getCreateSwigInstruction({
-      authorityInfo,
-      id: swigId,
-      payer: FEE_PAYER_PUBKEY,
-      actions: rootActions,
-    });
-    
-    const transaction = new Transaction();
-    transaction.add(createSwigInstruction);
-    transaction.recentBlockhash = blockhash;
-    transaction.feePayer = FEE_PAYER_PUBKEY;
-    
-    const transactionBase64 = Buffer.from(transaction.serialize({ requireAllSignatures: false })).toString('base64');
-    
-    const signResponse = await fetch('/api/transaction/sign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transactionBase64, network: 'mainnet' }),
-    });
-    
-    const signData = await signResponse.json();
-    if (!signData.success) {
-      throw new Error(signData.error || 'Failed to create wallet');
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    return true;
-  }
-}
-
-/**
- * Transfer from Swig to a specific address
- */
-export async function transferFromSwigToAddress(
-  connection: Connection,
-  swig: any,
-  walletAddress: PublicKey,
-  recipient: PublicKey,
-  amountLamports: number,
-  evmPrivateKey: string
-): Promise<string> {
-  const formattedKey = evmPrivateKey.startsWith('0x') ? evmPrivateKey : `0x${evmPrivateKey}`;
-  const evmAccount = privateKeyToAccount(formattedKey as `0x${string}`);
-  
-  const rootRole = swig.findRolesBySecp256k1SignerAddress(evmAccount.address)[0];
-  if (!rootRole) {
-    throw new Error('No role found for this authority');
-  }
-  
-  const currentSlot = await connection.getSlot('finalized');
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
-  
-  const transferInstruction = SystemProgram.transfer({
-    fromPubkey: walletAddress,
-    toPubkey: recipient,
-    lamports: amountLamports,
-  });
-  
-  const privateKeyBytes = hexToBytes(formattedKey as `0x${string}`);
-  const signingFn = getSigningFnForSecp256k1PrivateKey(privateKeyBytes);
-  
-  const signInstructions = await getSignInstructions(
-    swig,
-    rootRole.id,
-    [transferInstruction],
-    false,
-    {
-      currentSlot: BigInt(currentSlot),
-      signingFn,
-      payer: FEE_PAYER_PUBKEY,
-    }
-  );
-  
-  const transaction = new Transaction();
-  transaction.add(...signInstructions);
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = FEE_PAYER_PUBKEY;
-  
-  const transactionBase64 = Buffer.from(transaction.serialize({ requireAllSignatures: false })).toString('base64');
-  
-  const signResponse = await fetch('/api/transaction/sign', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transactionBase64, network: 'mainnet' }),
-  });
-  
-  const signData = await signResponse.json();
-  if (!signData.success) {
-    throw new Error(signData.error || 'Failed to sign transaction');
-  }
-  
-  return signData.data.signature;
-}
-
-/**
- * Get browser localStorage
- */
-export function getBrowserStorage(): Storage {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage;
-  }
-  throw new Error('localStorage not available');
-}
-
-/**
- * Deposit to Privacy Cash pool using Swig wallet
- */
-export async function depositToPoolWithSwig(
-  connection: Connection,
-  swig: any,
-  walletAddress: PublicKey,
-  amountLamports: number,
-  evmPrivateKey: string,
-  tempIndex: number,
-  updateStatus: (msg: string) => void
-): Promise<string> {
-  updateStatus(`Depositing ${amountLamports / LAMPORTS_PER_SOL} SOL to privacy pool...`);
-  
-  try {
-    const { deposit } = await import('privacycash/utils');
-    // @ts-ignore - hasher.rs has no type declarations
-    const { WasmFactory } = await import('@lightprotocol/hasher.rs');
-    const { PrivacyCash } = await import('privacycash');
-    
-    const lightWasm = await WasmFactory.getInstance();
-    
-    // Create a temp keypair for the deposit (Privacy Cash requires a keypair)
-    const tempKeypair = await deriveTempKeypair(evmPrivateKey, tempIndex);
-    
-    // First, transfer from Swig to temp keypair
-    updateStatus('Transferring to temporary address for pool deposit...');
-    await transferFromSwigToAddress(
-      connection, swig, walletAddress, tempKeypair.publicKey,
-      amountLamports + 15000000, evmPrivateKey // Add extra for fees
-    );
-    
-    // Wait for transfer to confirm
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Initialize PrivacyCash with temp keypair
-    const privacyCashClient = new PrivacyCash({
-      RPC_url: RPC_URL,
-      owner: tempKeypair,
-      enableDebug: false,
-    }) as any;
-    
-    // Transaction signer using temp keypair
-    const transactionSigner = async (tx: VersionedTransaction) => {
-      tx.sign([tempKeypair]);
-      return tx;
-    };
-    
-    // Deposit to pool
-    const result = await deposit({
-      lightWasm,
-      amount_in_lamports: amountLamports,
-      connection,
-      encryptionService: privacyCashClient.encryptionService,
-      publicKey: tempKeypair.publicKey,
-      transactionSigner,
-      keyBasePath: '/circuit2/transaction2',
-      storage: getBrowserStorage(),
-    });
-    
-    updateStatus('Waiting for deposit confirmation and UTXO indexing...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    return result.tx;
-  } catch (error: any) {
-    console.error('Privacy pool deposit error:', error);
-    throw new Error(`Privacy pool deposit failed: ${error.message}`);
-  }
-}
-
-/**
- * Withdraw from Privacy Cash pool to recipient
- */
-export async function withdrawFromPool(
-  connection: Connection,
-  amountLamports: number,
-  recipient: PublicKey,
-  evmPrivateKey: string,
-  tempIndex: number,
-  updateStatus: (msg: string) => void
-): Promise<string> {
-  updateStatus(`Withdrawing ${amountLamports / LAMPORTS_PER_SOL} SOL from privacy pool...`);
-  
-  try {
-    const { withdraw } = await import('privacycash/utils');
-    // @ts-ignore - hasher.rs has no type declarations
-    const { WasmFactory } = await import('@lightprotocol/hasher.rs');
-    const { PrivacyCash } = await import('privacycash');
-    
-    const lightWasm = await WasmFactory.getInstance();
-    
-    // Derive same temp keypair used for deposit
-    const tempKeypair = await deriveTempKeypair(evmPrivateKey, tempIndex);
-    
-    // Initialize PrivacyCash
-    const privacyCashClient = new PrivacyCash({
-      RPC_url: RPC_URL,
-      owner: tempKeypair,
-      enableDebug: false,
-    }) as any;
-    
-    // Transaction signer
-    const transactionSigner = async (tx: VersionedTransaction) => {
-      tx.sign([tempKeypair]);
-      return tx;
-    };
-    
-    // Withdraw from pool
-    const result = await withdraw({
-      lightWasm,
-      amount_in_lamports: amountLamports,
-      connection,
-      encryptionService: privacyCashClient.encryptionService,
-      publicKey: tempKeypair.publicKey,
-      recipient,
-      keyBasePath: '/circuit2/transaction2',
-      storage: getBrowserStorage(),
-    });
-    
-    return result.tx;
-  } catch (error: any) {
-    console.error('Privacy pool withdraw error:', error);
-    throw new Error(`Privacy pool withdraw failed: ${error.message}`);
-  }
-}
-
-/**
- * Calculate delay between deposit and withdraw based on privacy level
- */
-export function calculateDelayMs(numChunks: number): number {
-  const MIN_CHUNKS = 2;
-  const MAX_CHUNKS = 10;
-  const MAX_DELAY_MS = 4 * 60 * 60 * 1000; // 4 hours
-  
-  if (numChunks <= MIN_CHUNKS) return 0;
-  const totalDelay = ((numChunks - MIN_CHUNKS) / (MAX_CHUNKS - MIN_CHUNKS)) * MAX_DELAY_MS;
-  return Math.floor(totalDelay / 2);
+export function isValidPrivateKey(key: string): boolean {
+  const cleanKey = key.startsWith('0x') ? key.slice(2) : key;
+  return /^[0-9a-fA-F]{64}$/.test(cleanKey);
 }
 
 /**
@@ -416,48 +179,51 @@ export function formatTime(ms: number): string {
 }
 
 /**
- * Sleep with countdown updates
+ * Sleep with countdown callback
  */
 export async function sleepWithCountdown(
   ms: number,
   onUpdate: (remaining: string) => void
 ): Promise<void> {
-  if (ms <= 0) return;
+  const start = Date.now();
+  const interval = 1000; // Update every second
   
-  const endTime = Date.now() + ms;
-  
-  while (Date.now() < endTime) {
-    const remaining = endTime - Date.now();
+  while (Date.now() - start < ms) {
+    const remaining = ms - (Date.now() - start);
     onUpdate(formatTime(remaining));
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, Math.min(interval, remaining)));
   }
+  
+  onUpdate('0s');
 }
 
 /**
- * Generate random delays that sum to a target total
- * Used to distribute delays across multiple operations for privacy
+ * Generate random delays that sum to totalMs, distributed across numDelays
  */
 export function generateRandomDelays(totalMs: number, numDelays: number): number[] {
   if (numDelays === 0) return [];
-  if (totalMs <= 0) return Array(numDelays).fill(0);
+  if (numDelays === 1) return [totalMs];
   
-  // Generate random weights for each delay
-  const weights: number[] = [];
-  for (let i = 0; i < numDelays; i++) {
-    weights.push(0.5 + Math.random()); // Random between 0.5 and 1.5
-  }
-  
-  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  // Generate random weights
+  const weights = Array.from({ length: numDelays }, () => Math.random());
+  const sum = weights.reduce((a, b) => a + b, 0);
   
   // Distribute totalMs proportionally
-  const delays = weights.map(w => Math.floor((w / totalWeight) * totalMs));
+  const delays = weights.map(w => Math.floor((w / sum) * totalMs));
   
-  // Adjust to ensure exact sum (due to rounding)
-  const actualSum = delays.reduce((sum, d) => sum + d, 0);
-  const diff = totalMs - actualSum;
-  if (diff !== 0) {
-    delays[0] += diff; // Add remainder to first delay
-  }
+  // Ensure sum equals totalMs (adjust last delay)
+  const currentSum = delays.reduce((a, b) => a + b, 0);
+  delays[delays.length - 1] += totalMs - currentSum;
   
   return delays;
+}
+
+/**
+ * Get browser localStorage
+ */
+export function getBrowserStorage(): Storage {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return window.localStorage;
+  }
+  throw new Error('localStorage not available');
 }
