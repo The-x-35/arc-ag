@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import SendForm, { SplitPreview } from '@/components/SendForm';
 import PoolSelector from '@/components/PoolSelector';
 import { useWalletPrivateSend } from '@/hooks/useWalletPrivateSend';
+import { useSessionRecovery } from '@/hooks/useSessionRecovery';
 import { BurnerType } from '@/types';
 import { poolRegistry } from '@/lib/pools/registry';
 import { privacyCashPool } from '@/lib/pools/privacy-cash';
@@ -58,7 +59,7 @@ export default function Home() {
   const connectionRef = useRef<Connection | null>(null);
   
   // Wallet state
-  const { connected } = useWallet();
+  const { connected, publicKey } = useWallet();
   
   // Pool state
   const [pools, setPools] = useState<Array<{
@@ -73,14 +74,33 @@ export default function Home() {
 
   // Hook for EOA mode
   const walletSend = useWalletPrivateSend();
-  const { steps, loading, error, result, reset, burnerWallets } = walletSend;
+  const { steps, loading, error, result, reset, burnerWallets, recoverAndContinue, hasActiveSession, recoveryMode } = walletSend;
   const flowSteps = EOA_FLOW_STEPS;
+  
+  // Recovery state
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  
+  // Session history state
+  const [showSessionHistory, setShowSessionHistory] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  
+  // Session recovery hook
+  const { getSessionHistory, recoverSession } = useSessionRecovery();
 
   // Initialize connection
   useEffect(() => {
     connectionRef.current = new Connection(getSolanaRpc('mainnet'), 'confirmed');
   }, []);
 
+  // Check for active session on mount
+  useEffect(() => {
+    if (connected && hasActiveSession && !loading && !recoveryMode) {
+      setShowRecoveryPrompt(true);
+    }
+  }, [connected, hasActiveSession, loading, recoveryMode]);
+  
   // Load pools and available amounts on mount
   useEffect(() => {
     async function loadData() {
@@ -116,6 +136,68 @@ export default function Home() {
     
     loadData();
   }, []);
+  
+  // Handle recovery
+  const handleRecover = useCallback(async () => {
+    if (!publicKey) return;
+    
+    setRecovering(true);
+    setShowRecoveryPrompt(false);
+    try {
+      // Fetch the active session to restore form state
+      const session = await recoverSession(publicKey.toBase58());
+      
+      if (session) {
+        // Restore form state from session
+        const params = session.transaction_params;
+        setDestination(params.destination);
+        setAmount(params.amount.toString());
+        setPrivacyLevel(params.numChunks);
+        setDelayMinutes(params.delayMinutes);
+        if (params.selectedPools) {
+          setSelectedPools(params.selectedPools);
+        }
+        
+        // Continue the session with the fetched session data
+        await recoverAndContinue(session);
+      } else {
+        throw new Error('No active session found');
+      }
+    } catch (err: any) {
+      console.error('Recovery failed:', err);
+      // Error is handled by the hook's error state
+      setShowRecoveryPrompt(true); // Show prompt again on error
+    } finally {
+      setRecovering(false);
+    }
+  }, [recoverAndContinue, publicKey, recoverSession]);
+  
+  // Handle dismiss recovery
+  const handleDismissRecovery = useCallback(() => {
+    setShowRecoveryPrompt(false);
+  }, []);
+  
+  // Load session history
+  const loadSessionHistory = useCallback(async () => {
+    if (!connected || !publicKey) return;
+    
+    setLoadingHistory(true);
+    try {
+      const sessions = await getSessionHistory(publicKey.toBase58(), { limit: 50 });
+      setSessionHistory(sessions);
+    } catch (err: any) {
+      console.error('Failed to load session history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [connected, publicKey, getSessionHistory]);
+  
+  // Load history when showing history panel
+  useEffect(() => {
+    if (showSessionHistory && connected && publicKey) {
+      loadSessionHistory();
+    }
+  }, [showSessionHistory, connected, publicKey, loadSessionHistory]);
 
   // Compute split preview when amount or privacy level changes
   const computeSplitPreview = useCallback(async (amountSol: number, numChunks: number) => {
@@ -265,6 +347,64 @@ export default function Home() {
 
   return (
     <main style={{ minHeight: '100vh', padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+      {/* Recovery Prompt */}
+      {showRecoveryPrompt && connected && (
+        <div style={{
+          marginBottom: '24px',
+          padding: '16px',
+          background: '#1a1a2e',
+          border: '1px solid #3b82f6',
+          borderRadius: '8px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '16px'
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: '#fff', fontWeight: '600', marginBottom: '4px' }}>
+              Active Session Found
+            </div>
+            <div style={{ color: '#888', fontSize: '13px' }}>
+              You have an active transaction session. Would you like to recover and continue?
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleRecover}
+              disabled={recovering}
+              style={{
+                padding: '8px 16px',
+                background: '#3b82f6',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#fff',
+                fontWeight: '600',
+                cursor: recovering ? 'not-allowed' : 'pointer',
+                opacity: recovering ? 0.6 : 1,
+                fontSize: '13px'
+              }}
+            >
+              {recovering ? 'Recovering...' : 'Recover Session'}
+            </button>
+            <button
+              onClick={handleDismissRecovery}
+              disabled={recovering}
+              style={{
+                padding: '8px 16px',
+                background: '#222',
+                border: '1px solid #444',
+                borderRadius: '6px',
+                color: '#fff',
+                cursor: recovering ? 'not-allowed' : 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <header style={{ 
         display: 'flex', 
@@ -290,6 +430,22 @@ export default function Home() {
           >
             Test Indexer
           </a>
+          {connected && (
+            <button
+              onClick={() => setShowSessionHistory(!showSessionHistory)}
+              style={{
+                padding: '4px 12px',
+                background: showSessionHistory ? '#3b82f6' : '#222',
+                borderRadius: '4px',
+                fontSize: '12px',
+                border: '1px solid #333',
+                color: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              {showSessionHistory ? 'Hide' : 'View'} Sessions
+            </button>
+          )}
           <span style={{ 
             padding: '4px 12px', 
             background: '#1a1a1a', 
@@ -299,6 +455,152 @@ export default function Home() {
           }}>Mainnet</span>
         </div>
       </header>
+      
+      {/* Session History Panel */}
+      {showSessionHistory && connected && (
+        <div style={{
+          marginBottom: '24px',
+          padding: '16px',
+          background: '#111',
+          border: '1px solid #333',
+          borderRadius: '8px'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '16px'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+              Session History
+            </h3>
+            <button
+              onClick={loadSessionHistory}
+              disabled={loadingHistory}
+              style={{
+                padding: '6px 12px',
+                background: '#222',
+                border: '1px solid #444',
+                borderRadius: '6px',
+                color: '#fff',
+                cursor: loadingHistory ? 'not-allowed' : 'pointer',
+                fontSize: '12px',
+                opacity: loadingHistory ? 0.6 : 1
+              }}
+            >
+              {loadingHistory ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+          
+          {loadingHistory ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#888' }}>
+              Loading sessions...
+            </div>
+          ) : sessionHistory.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#888' }}>
+              No sessions found
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
+              {sessionHistory.map((session) => {
+                const statusColors: Record<string, string> = {
+                  completed: '#22c55e',
+                  in_progress: '#3b82f6',
+                  pending: '#f59e0b',
+                  failed: '#ef4444',
+                };
+                
+                const date = new Date(session.created_at);
+                const params = session.transaction_params;
+                
+                return (
+                  <div
+                    key={session.id}
+                    style={{
+                      padding: '12px',
+                      background: '#0a0a0a',
+                      border: `1px solid ${statusColors[session.status] || '#333'}`,
+                      borderRadius: '6px',
+                      fontSize: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
+                      <div>
+                        <div style={{ color: '#fff', fontWeight: '600', marginBottom: '4px' }}>
+                          {date.toLocaleString()}
+                        </div>
+                        <div style={{ color: '#888', fontSize: '11px', fontFamily: 'monospace' }}>
+                          {session.id.slice(0, 8)}...{session.id.slice(-8)}
+                        </div>
+                      </div>
+                      <span style={{
+                        padding: '2px 8px',
+                        background: statusColors[session.status] || '#666',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        fontWeight: '600',
+                        textTransform: 'uppercase'
+                      }}>
+                        {session.status}
+                      </span>
+                    </div>
+                    
+                    <div style={{ color: '#888', marginTop: '8px' }}>
+                      <div>Amount: {params.amount} SOL</div>
+                      <div>Chunks: {params.numChunks}</div>
+                      <div>Destination: {params.destination.slice(0, 8)}...{params.destination.slice(-8)}</div>
+                      <div>Step: {session.current_step} / 13</div>
+                      {session.signatures && session.signatures.length > 0 && (
+                        <div>Signatures: {session.signatures.length}</div>
+                      )}
+                    </div>
+                    
+                    {(session.status === 'pending' || session.status === 'in_progress') && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            // Restore form state from session
+                            const params = session.transaction_params;
+                            setDestination(params.destination);
+                            setAmount(params.amount.toString());
+                            setPrivacyLevel(params.numChunks);
+                            setDelayMinutes(params.delayMinutes);
+                            if (params.selectedPools) {
+                              setSelectedPools(params.selectedPools);
+                            }
+                            
+                            // Close history panel
+                            setShowSessionHistory(false);
+                            
+                            // Continue the session
+                            await recoverAndContinue(session);
+                          } catch (err: any) {
+                            console.error('Failed to continue session:', err);
+                            alert(`Failed to continue session: ${err.message}`);
+                          }
+                        }}
+                        style={{
+                          marginTop: '8px',
+                          padding: '6px 12px',
+                          background: '#3b82f6',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '600'
+                        }}
+                      >
+                        Continue Session
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Content - 3 columns */}
       <div style={{ 

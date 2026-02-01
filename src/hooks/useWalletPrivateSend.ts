@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { 
   Connection, 
@@ -15,6 +15,9 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { isValidSolanaAddress, formatTime, sleepWithCountdown, generateRandomDelays, isBlockLengthExceededError, retryTransaction } from '@/lib/swig/utils';
 import { poolRegistry } from '@/lib/pools/registry';
 import { transactionIndexer } from '@/lib/indexer/transaction-indexer';
+import { useSessionRecovery, SessionData } from './useSessionRecovery';
+import { generateAllBurners, getBurnerByIndex } from '@/lib/wallets/deterministic-eoa';
+import { keccak256, toBytes } from 'viem';
 
 // Get RPC URL - same as wallet provider
 const getRpcUrl = () => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(WalletAdapterNetwork.Mainnet);
@@ -92,22 +95,101 @@ function getBrowserStorage(): Storage {
 }
 
 export function useWalletPrivateSend() {
-  const { publicKey, signTransaction, connected } = useWallet();
+  const { publicKey, signTransaction, signMessage, connected } = useWallet();
   const { connection } = useConnection();
+  const { createSession, updateSession, recoverSession, deleteSession } = useSessionRecovery();
   
   const [steps, setSteps] = useState<WalletPrivateSendStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<WalletPrivateSendResult | null>(null);
   const [burnerWallets, setBurnerWallets] = useState<EOABurnerWalletInfo[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   const updateStep = useCallback((stepId: number, status: 'pending' | 'running' | 'completed' | 'error', message?: string) => {
     setSteps(prev => prev.map(step => 
       step.id === stepId ? { ...step, status, message } : step
     ));
-  }, []);
+    
+    // Persist step update to session
+    if (currentSessionId) {
+      updateSession(currentSessionId, {
+        current_step: stepId,
+        status: status === 'running' ? 'in_progress' : status === 'completed' ? 'in_progress' : status === 'error' ? 'failed' : 'pending',
+      }).catch(err => console.error('Failed to update session step:', err));
+    }
+  }, [currentSessionId, updateSession]);
+  
+  /**
+   * Helper to persist session state
+   */
+  const persistSessionState = useCallback(async (
+    burners: EOABurnerWalletInfo[],
+    sigs: string[],
+    chunkAmts?: number[],
+    usedDeposits?: Set<number>
+  ) => {
+    if (!currentSessionId) return;
+    
+    try {
+      await updateSession(currentSessionId, {
+        burner_addresses: burners.map(b => ({
+          index: b.index,
+          address: b.address,
+          type: b.type,
+        })),
+        signatures: sigs,
+        chunk_amounts: chunkAmts,
+        used_deposit_amounts: usedDeposits ? Array.from(usedDeposits) : undefined,
+      });
+    } catch (err) {
+      console.error('Failed to persist session state:', err);
+    }
+  }, [currentSessionId, updateSession]);
+  
+  /**
+   * Sign a message with the wallet (for session word)
+   */
+  const signMessageWithWallet = useCallback(async (message: string): Promise<string> => {
+    if (!signMessage) {
+      // Fallback: create a transaction to sign if signMessage is not available
+      if (!signTransaction || !publicKey || !connection) {
+        throw new Error('Wallet does not support message signing');
+      }
+      
+      // Create a minimal transaction that encodes the message
+      const { SystemProgram, Transaction } = await import('@solana/web3.js');
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: publicKey, // Self-transfer with 0 amount
+          lamports: 0,
+        })
+      );
+      
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
+      
+      // Add message as memo (if available) or use transaction signature
+      const signed = await signTransaction(transaction);
+      const signature = Buffer.from(signed.serialize()).toString('hex');
+      return keccak256(toBytes(`${message}_${signature}`));
+    }
+    
+    // Use signMessage if available
+    const messageBytes = new TextEncoder().encode(message);
+    const signature = await signMessage(messageBytes);
+    // Convert signature to hex string for hashing
+    const sigHex = Buffer.from(signature).toString('hex');
+    return keccak256(toBytes(`${message}_${sigHex}`));
+  }, [signMessage, signTransaction, publicKey, connection]);
 
-  const execute = useCallback(async (params: WalletPrivateSendParams) => {
+  /**
+   * Execute transaction with session recovery support
+   */
+  const execute = useCallback(async (params: WalletPrivateSendParams, recoveredSession?: SessionData) => {
     const { destination, amount, numChunks, delayMinutes, sponsorFees, exactChunks } = params;
     
     if (!connected || !publicKey || !signTransaction) {
@@ -124,6 +206,62 @@ export function useWalletPrivateSend() {
     setError(null);
     setResult(null);
     setBurnerWallets([]);
+    
+    // Session management
+    let sessionId: string | null = null;
+    let sessionWord: string | null = null;
+    let signedHash: string | null = null;
+    
+    try {
+      // If recovering from session, use existing session data
+      if (recoveredSession) {
+        sessionId = recoveredSession.id;
+        sessionWord = recoveredSession.session_word;
+        setCurrentSessionId(sessionId);
+        setRecoveryMode(true);
+        
+        // Restore state from session
+        if (recoveredSession.burner_addresses && recoveredSession.burner_addresses.length > 0) {
+          const restoredBurners: EOABurnerWalletInfo[] = recoveredSession.burner_addresses.map(b => ({
+            index: b.index,
+            address: b.address,
+            privateKey: '', // Will be regenerated deterministically
+            type: b.type,
+          }));
+          setBurnerWallets(restoredBurners);
+        }
+        
+        // Restore step progress
+        const currentStep = recoveredSession.current_step;
+        setSteps(STEPS.map(s => ({
+          ...s,
+          status: s.id < currentStep ? 'completed' as const : s.id === currentStep ? 'running' as const : 'pending' as const,
+        })));
+        
+        // Request user to sign word again for deterministic generation
+        updateStep(currentStep, 'running', 'Please sign the session word to continue...');
+        signedHash = await signMessageWithWallet(sessionWord);
+      } else {
+        // Create new session
+        updateStep(1, 'running', 'Creating session...');
+        const session = await createSession(publicKey.toBase58(), params);
+        sessionId = session.sessionId;
+        sessionWord = session.word;
+        setCurrentSessionId(sessionId);
+        
+        // Request user to sign the word
+        updateStep(1, 'running', 'Please sign the session word to generate deterministic wallets...');
+        signedHash = await signMessageWithWallet(sessionWord);
+        
+        // Update session with signed hash (store hash, not word)
+        await updateSession(sessionId, {
+          status: 'in_progress',
+        });
+      }
+    } catch (err: any) {
+      console.error('Session setup error:', err);
+      throw new Error(`Session setup failed: ${err.message}`);
+    }
 
     // If exact chunks provided, use their total, otherwise use amount
     const amountLamports = exactChunks && exactChunks.length === numChunks 
@@ -220,10 +358,21 @@ export function useWalletPrivateSend() {
       
       updateStep(1, 'completed', 'Inputs validated');
 
-      // Step 2: Generate first burner wallet
+      // Step 2: Generate first burner wallet (deterministically)
       updateStep(2, 'running', 'Generating first burner wallet...');
       
-      const firstBurnerKeypair = Keypair.generate();
+      let firstBurnerKeypair: Keypair;
+      if (recoveredSession && signedHash) {
+        // Recover from session: regenerate deterministically
+        firstBurnerKeypair = getBurnerByIndex(signedHash, 0);
+      } else {
+        // New session: generate deterministically from signed hash
+        if (!signedHash) {
+          throw new Error('Signed hash not available');
+        }
+        firstBurnerKeypair = getBurnerByIndex(signedHash, 0);
+      }
+      
       const firstBurnerInfo: EOABurnerWalletInfo = {
         index: 0,
         address: firstBurnerKeypair.publicKey.toBase58(),
@@ -232,6 +381,9 @@ export function useWalletPrivateSend() {
       };
       generatedBurners.push(firstBurnerInfo);
       setBurnerWallets([...generatedBurners]);
+      
+      // Persist first burner
+      await persistSessionState(generatedBurners, signatures);
       
       updateStep(2, 'completed', 'First burner wallet generated');
 
@@ -398,6 +550,8 @@ export function useWalletPrivateSend() {
             signatures.push(depositResult.tx);
             // Track used deposit amounts for withdrawal planning
             usedDepositAmounts.add(depositAmount);
+            // Persist after each deposit
+            await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
           } else {
             console.warn(`[Deposit chunk ${i + 1}] Skipped due to block length exceeded`);
             updateStep(4, 'running', `Chunk ${i + 1} skipped (transaction too large)`);
@@ -416,6 +570,9 @@ export function useWalletPrivateSend() {
         }
         
         updateStep(4, 'completed', 'All chunks deposited to pool');
+        
+        // Persist after all deposits
+        await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
         
       } catch (err: any) {
         console.error('First burner deposit error:', err);
@@ -439,11 +596,15 @@ export function useWalletPrivateSend() {
         updateStep(6, 'completed', 'No delay (fast mode)');
       }
 
-      // Step 7: Generate additional burner keypairs
+      // Step 7: Generate additional burner keypairs (deterministically)
       updateStep(7, 'running', `Generating ${numChunks} burner keypairs...`);
       
+      if (!signedHash) {
+        throw new Error('Signed hash not available for deterministic generation');
+      }
+      
       for (let i = 0; i < numChunks; i++) {
-        const keypair = Keypair.generate();
+        const keypair = getBurnerByIndex(signedHash, i + 1);
         burnerKeypairs.push(keypair);
         generatedBurners.push({
           index: i + 1,
@@ -456,12 +617,19 @@ export function useWalletPrivateSend() {
         setBurnerWallets([...generatedBurners]);
       }
       
+      // Persist intermediate burners
+      await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
+      
       updateStep(7, 'completed', `${numChunks} burner keypairs generated`);
 
-      // Step 8: Generate final burner wallet
+      // Step 8: Generate final burner wallet (deterministically)
       updateStep(8, 'running', 'Generating final burner wallet...');
       
-      const finalBurnerKeypair = Keypair.generate();
+      if (!signedHash) {
+        throw new Error('Signed hash not available for deterministic generation');
+      }
+      
+      const finalBurnerKeypair = getBurnerByIndex(signedHash, -1);
       const finalBurnerClient = new PrivacyCash({
         RPC_url: getRpcUrl(),
         owner: finalBurnerKeypair,
@@ -476,6 +644,9 @@ export function useWalletPrivateSend() {
         type: 'eoa',
       });
       setBurnerWallets([...generatedBurners]);
+      
+      // Persist final burner
+      await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
       
       updateStep(8, 'completed', 'Final burner wallet generated');
 
@@ -645,6 +816,8 @@ export function useWalletPrivateSend() {
             signatures.push(depositResult.tx);
             // Track used deposit amounts (for re-deposits) for withdrawal planning
             usedDepositAmounts.add(depositAmount);
+            // Persist after each re-deposit
+            await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
           } else {
             console.warn(`[Re-deposit burner ${i + 1}] Skipped due to block length exceeded`);
             updateStep(10, 'running', `Burner ${i + 1} re-deposit skipped (transaction too large)`);
@@ -776,6 +949,8 @@ export function useWalletPrivateSend() {
           
           if (withdrawResult) {
             signatures.push(withdrawResult.tx);
+            // Persist after each final withdrawal
+            await persistSessionState(generatedBurners, signatures, chunkAmounts, usedDepositAmounts);
           } else {
             console.warn(
               `[Final burner withdraw chunk ${i + 1}] Skipped due to transaction too large`
@@ -878,8 +1053,19 @@ export function useWalletPrivateSend() {
         recipient: destination,
       };
       
+      // Mark session as completed and clean up
+      if (sessionId) {
+        await updateSession(sessionId, {
+          status: 'completed',
+          current_step: 13,
+        });
+        await deleteSession(sessionId);
+        setCurrentSessionId(null);
+      }
+      
       setResult(finalResult);
       setLoading(false);
+      setRecoveryMode(false);
       
       return finalResult;
 
@@ -892,21 +1078,105 @@ export function useWalletPrivateSend() {
         step.status === 'running' ? { ...step, status: 'error', message: errorMessage } : step
       ));
       
+      // Mark session as failed (but don't delete - allow recovery)
+      if (sessionId) {
+        await updateSession(sessionId, {
+          status: 'failed',
+        }).catch(e => console.error('Failed to update session on error:', e));
+      }
+      
       setLoading(false);
+      setRecoveryMode(false);
       throw err;
     }
-  }, [connected, publicKey, signTransaction, connection, updateStep]);
+  }, [connected, publicKey, signTransaction, connection, updateStep, createSession, updateSession, deleteSession, signMessageWithWallet, persistSessionState]);
+  
+  /**
+   * Recover and continue from a saved session
+   * Can be called with a session directly or will fetch active session
+   */
+  const recoverAndContinue = useCallback(async (sessionData?: SessionData) => {
+    if (!connected || !publicKey) {
+      throw new Error('Wallet not connected');
+    }
+    
+    try {
+      let session: SessionData;
+      
+      if (sessionData) {
+        // Use provided session data
+        session = sessionData;
+      } else {
+        // Fetch active session
+        const fetchedSession = await recoverSession(publicKey.toBase58());
+        if (!fetchedSession) {
+          throw new Error('No active session found');
+        }
+        session = fetchedSession;
+      }
+      
+      // Restore params from session
+      const params: WalletPrivateSendParams = {
+        destination: session.transaction_params.destination,
+        amount: session.transaction_params.amount,
+        numChunks: session.transaction_params.numChunks,
+        delayMinutes: session.transaction_params.delayMinutes,
+        sponsorFees: false, // Default to false
+        exactChunks: session.transaction_params.exactChunks,
+        selectedPools: session.transaction_params.selectedPools,
+      };
+      
+      // Continue execution from saved step
+      await execute(params, session);
+      
+      // Return params so UI can restore form state
+      return params;
+    } catch (err: any) {
+      console.error('Recovery failed:', err);
+      throw err;
+    }
+  }, [connected, publicKey, recoverSession, execute]);
+  
+  /**
+   * Check for active session on mount
+   */
+  useEffect(() => {
+    if (connected && publicKey && !loading) {
+      recoverSession(publicKey.toBase58())
+        .then(session => {
+          if (session && (session.status === 'pending' || session.status === 'in_progress')) {
+            // Session exists but don't auto-recover - let user decide
+            console.log('Active session found:', session.id);
+          }
+        })
+        .catch(err => {
+          console.error('Error checking for session:', err);
+        });
+    }
+  }, [connected, publicKey, loading, recoverSession]);
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async () => {
+    // Clean up session if exists
+    if (currentSessionId) {
+      try {
+        await deleteSession(currentSessionId);
+      } catch (err) {
+        console.error('Failed to delete session on reset:', err);
+      }
+      setCurrentSessionId(null);
+    }
+    
     setSteps([]);
     setLoading(false);
     setError(null);
     setResult(null);
     setBurnerWallets([]);
-  }, []);
+    setRecoveryMode(false);
+  }, [currentSessionId, deleteSession]);
 
   return {
     execute,
+    recoverAndContinue,
     reset,
     steps,
     loading,
@@ -915,5 +1185,7 @@ export function useWalletPrivateSend() {
     burnerWallets,
     isWalletConnected: connected,
     walletAddress: publicKey?.toBase58(),
+    hasActiveSession: currentSessionId !== null,
+    recoveryMode,
   };
 }
