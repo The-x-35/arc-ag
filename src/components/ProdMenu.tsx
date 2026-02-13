@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useSessionRecovery, SessionData } from '@/hooks/useSessionRecovery';
+import { useSolPrice, formatSolAmount } from '@/hooks/useSolPrice';
 
 interface ProdMenuProps {
   onShowBurners?: () => void;
@@ -21,6 +22,7 @@ export default function ProdMenu({
   const { getSessionHistory } = useSessionRecovery();
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const { price: solPrice } = useSolPrice();
 
   useEffect(() => {
     if (isOpen && showSessions && connected && publicKey) {
@@ -298,7 +300,7 @@ export default function ProdMenu({
                           </div>
                           
                           <div style={{ color: '#888', marginTop: '6px', fontSize: '11px' }}>
-                            <div>Amount: {params.amount} SOL</div>
+                            <div>Amount: {formatSolAmount(params.amount, solPrice, 6)}</div>
                             <div>Chunks: {params.numChunks}</div>
                             <div>Step: {session.current_step} / 13</div>
                           </div>

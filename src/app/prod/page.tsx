@@ -11,6 +11,7 @@ import { shadowPayPool } from '@/lib/pools/shadowpay';
 import { transactionIndexer } from '@/lib/indexer/transaction-indexer';
 import { useWalletPrivateSend } from '@/hooks/useWalletPrivateSend';
 import { useSessionRecovery, SessionData } from '@/hooks/useSessionRecovery';
+import { useSolPrice, formatSolAmount } from '@/hooks/useSolPrice';
 import PrivacySlider from '@/components/PrivacySlider';
 import PrivacyProgressBar from '@/components/PrivacyProgressBar';
 import PrivacySettingsModal from '@/components/PrivacySettingsModal';
@@ -76,6 +77,7 @@ export default function ProdPage() {
   const walletSend = useWalletPrivateSend();
   const { steps, loading, error, result, reset, burnerWallets, recoverAndContinue, hasActiveSession } = walletSend;
   const { getSessionHistory } = useSessionRecovery();
+  const { price: solPrice } = useSolPrice();
   
   // Recovery state
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
@@ -471,7 +473,7 @@ export default function ProdPage() {
             }}
           />
           <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
-            Min {(0.035 * chunks).toFixed(2)} SOL ({chunks} × 0.035 SOL per chunk)
+            Min {formatSolAmount(0.035 * chunks, solPrice, 2)} ({chunks} × {formatSolAmount(0.035, solPrice, 3)} per chunk)
           </div>
         </div>
         
@@ -527,7 +529,7 @@ export default function ProdPage() {
                         border: '1px solid #1a4a1a'
                       }}
                     >
-                      {chunk.sol} SOL
+                      {formatSolAmount(chunk.sol, solPrice, 6)}
                       {chunk.isHistorical && chunk.frequency && (
                         <span style={{ marginLeft: '4px', fontSize: '10px', color: '#888' }}>
                           ({chunk.frequency}×)
@@ -541,7 +543,7 @@ export default function ProdPage() {
                   color: '#888',
                   marginTop: '8px'
                 }}>
-                  Total: {splitPreview.result.totalSol} SOL • Each chunk matches historical transactions
+                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} • Each chunk matches historical transactions
                 </div>
               </div>
             ) : splitPreview?.result?.error ? (
@@ -574,10 +576,10 @@ export default function ProdPage() {
                     fontSize: '12px',
                     color: '#ef4444'
                   }}>
-                    ⚠ Amount below recommended minimum ({minAmount.toFixed(3)} SOL for {chunks} chunks)
+                    ⚠ Amount below recommended minimum ({formatSolAmount(minAmount, solPrice, 3)} for {chunks} chunks)
                     <br />
                     <span style={{ color: '#888', fontSize: '11px' }}>
-                      Each chunk will be {(amountNum / chunks).toFixed(6)} SOL (minimum recommended: 0.035 SOL per chunk)
+                      Each chunk will be {formatSolAmount(amountNum / chunks, solPrice, 6)} (minimum recommended: {formatSolAmount(0.035, solPrice, 3)} per chunk)
                     </span>
                   </div>
                 )}
@@ -591,7 +593,7 @@ export default function ProdPage() {
                     fontSize: '12px',
                     color: '#f59e0b'
                   }}>
-                    ⚠ Custom amount: Will split equally into {chunks} chunks of {(amountNum / chunks).toFixed(6)} SOL each
+                    ⚠ Custom amount: Will split equally into {chunks} chunks of {formatSolAmount(amountNum / chunks, solPrice, 6)} each
                     <br />
                     <span style={{ color: '#888', fontSize: '11px' }}>
                       This may reduce privacy compared to using exact historical amounts
@@ -622,9 +624,9 @@ export default function ProdPage() {
                             opacity: loading ? 0.6 : 1
                           }}
                         >
-                          <div style={{ fontWeight: '600' }}>{suggestion.sol} SOL</div>
+                          <div style={{ fontWeight: '600' }}>{formatSolAmount(suggestion.sol, solPrice, 6)}</div>
                           <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
-                            {suggestion.chunks.map(c => c + ' SOL').join(' + ')}
+                            {suggestion.chunks.map(c => formatSolAmount(c, solPrice, 6)).join(' + ')}
                           </div>
                         </button>
                       ))}
@@ -663,7 +665,7 @@ export default function ProdPage() {
                       opacity: loading ? 0.6 : 1
                     }}
                   >
-                    {amt.sol} SOL
+                    {formatSolAmount(amt.sol, solPrice, 6)}
                     <span style={{ color: '#666', marginLeft: '4px' }}>
                       ({amt.frequency}×)
                     </span>
@@ -720,7 +722,7 @@ export default function ProdPage() {
             fontSize: '13px'
           }}>
             <div style={{ marginBottom: '8px' }}>
-              ✓ Complete! Sent {result.totalAmount} SOL to {result.recipient.slice(0,8)}...{result.recipient.slice(-8)}
+              ✓ Complete! Sent {formatSolAmount(result.totalAmount, solPrice, 6)} to {result.recipient.slice(0,8)}...{result.recipient.slice(-8)}
             </div>
             <button
               type="button"
@@ -765,9 +767,9 @@ export default function ProdPage() {
           }}
         >
           {loading ? 'Processing...' : splitPreview?.result?.valid 
-            ? `Send ${splitPreview.result.totalSol} SOL Privately` 
+            ? `Send ${formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} Privately` 
             : meetsMinimum 
-              ? `Send ${amountNum.toFixed(6)} SOL (Custom Split)` 
+              ? `Send ${formatSolAmount(amountNum, solPrice, 6)} (Custom Split)` 
               : 'Enter valid amount'}
         </button>
       </div>
