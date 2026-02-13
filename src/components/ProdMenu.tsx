@@ -1,0 +1,332 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useSessionRecovery, SessionData } from '@/hooks/useSessionRecovery';
+
+interface ProdMenuProps {
+  onShowBurners?: () => void;
+  onShowSettings?: () => void;
+  onRecoverSession?: (session: SessionData) => void;
+}
+
+export default function ProdMenu({ 
+  onShowBurners, 
+  onShowSettings,
+  onRecoverSession 
+}: ProdMenuProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
+  const { connected, publicKey } = useWallet();
+  const { getSessionHistory } = useSessionRecovery();
+  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && showSessions && connected && publicKey) {
+      loadSessions();
+    }
+  }, [isOpen, showSessions, connected, publicKey]);
+
+  const loadSessions = async () => {
+    if (!publicKey) return;
+    setLoadingSessions(true);
+    try {
+      const sessionList = await getSessionHistory(publicKey.toBase58(), { limit: 20 });
+      setSessions(sessionList);
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+      setSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const handleSessionClick = (session: SessionData) => {
+    if (onRecoverSession) {
+      onRecoverSession(session);
+      setIsOpen(false);
+      setShowSessions(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          padding: '8px',
+          background: isOpen ? '#3b82f6' : 'transparent',
+          border: '1px solid #444',
+          borderRadius: '6px',
+          color: '#fff',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '36px',
+          height: '36px',
+          fontSize: '18px'
+        }}
+        title="Menu"
+      >
+        ☰
+      </button>
+
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 998
+            }}
+            onClick={() => {
+              setIsOpen(false);
+              setShowSessions(false);
+            }}
+          />
+
+          {/* Menu Dropdown */}
+          <div style={{
+            position: 'absolute',
+            top: '44px',
+            right: 0,
+            background: '#111',
+            border: '1px solid #333',
+            borderRadius: '8px',
+            minWidth: '280px',
+            maxWidth: '400px',
+            zIndex: 999,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+          }}>
+            {/* Menu Items */}
+            <div style={{ padding: '8px' }}>
+              {onShowBurners && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShowBurners();
+                    setIsOpen(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#222';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span>👛</span>
+                  <span>View Burner Wallets</span>
+                </button>
+              )}
+
+              {onShowSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShowSettings();
+                    setIsOpen(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#222';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span>⚙️</span>
+                  <span>Settings</span>
+                </button>
+              )}
+
+              {connected && publicKey && (
+                <button
+                  type="button"
+                  onClick={() => setShowSessions(!showSessions)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: showSessions ? '#222' : 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!showSessions) {
+                      e.currentTarget.style.background = '#222';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!showSessions) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span>📋</span>
+                    <span>Sessions</span>
+                  </div>
+                  <span>{showSessions ? '▼' : '▶'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Sessions List */}
+            {showSessions && connected && publicKey && (
+              <div style={{
+                borderTop: '1px solid #333',
+                padding: '8px',
+                maxHeight: '400px',
+                overflowY: 'auto'
+              }}>
+                {loadingSessions ? (
+                  <div style={{
+                    padding: '20px',
+                    textAlign: 'center',
+                    color: '#888',
+                    fontSize: '13px'
+                  }}>
+                    Loading sessions...
+                  </div>
+                ) : sessions.length === 0 ? (
+                  <div style={{
+                    padding: '20px',
+                    textAlign: 'center',
+                    color: '#666',
+                    fontSize: '13px'
+                  }}>
+                    No sessions found
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {sessions.map((session) => {
+                      const statusColors: Record<string, string> = {
+                        completed: '#22c55e',
+                        in_progress: '#3b82f6',
+                        pending: '#f59e0b',
+                        failed: '#ef4444',
+                      };
+                      
+                      const date = new Date(session.created_at);
+                      const params = session.transaction_params;
+                      
+                      return (
+                        <div
+                          key={session.id}
+                          style={{
+                            padding: '10px',
+                            background: '#0a0a0a',
+                            border: `1px solid ${statusColors[session.status] || '#333'}`,
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            cursor: (session.status === 'pending' || session.status === 'in_progress') ? 'pointer' : 'default'
+                          }}
+                          onClick={() => {
+                            if (session.status === 'pending' || session.status === 'in_progress') {
+                              handleSessionClick(session);
+                            }
+                          }}
+                          onMouseEnter={(e) => {
+                            if (session.status === 'pending' || session.status === 'in_progress') {
+                              e.currentTarget.style.background = '#1a1a1a';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#0a0a0a';
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '6px' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ color: '#fff', fontWeight: '600', marginBottom: '2px' }}>
+                                {date.toLocaleString()}
+                              </div>
+                              <div style={{ color: '#888', fontSize: '11px', fontFamily: 'monospace' }}>
+                                {session.id.slice(0, 8)}...{session.id.slice(-8)}
+                              </div>
+                            </div>
+                            <span style={{
+                              padding: '2px 6px',
+                              background: statusColors[session.status] || '#666',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: '600',
+                              textTransform: 'uppercase'
+                            }}>
+                              {session.status}
+                            </span>
+                          </div>
+                          
+                          <div style={{ color: '#888', marginTop: '6px', fontSize: '11px' }}>
+                            <div>Amount: {params.amount} SOL</div>
+                            <div>Chunks: {params.numChunks}</div>
+                            <div>Step: {session.current_step} / 13</div>
+                          </div>
+
+                          {(session.status === 'pending' || session.status === 'in_progress') && (
+                            <div style={{
+                              marginTop: '6px',
+                              padding: '4px 8px',
+                              background: '#3b82f6',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              color: '#fff',
+                              textAlign: 'center',
+                              fontWeight: '500'
+                            }}>
+                              Click to Continue
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
