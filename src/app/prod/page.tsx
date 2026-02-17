@@ -890,7 +890,7 @@ export default function ProdPage() {
             </div>
           </div>
           <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
-            Min {formatSolAmount(0.035 * chunks, solPrice, 2)} ({chunks} × {formatSolAmount(0.035, solPrice, 3)} per chunk)
+            Min {formatSolAmount(0.035 * chunks, solPrice, 2)}
             {maxSolAmount && (
               <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)} (USD ${MAX_USD.toFixed(0)})</>
             )}
@@ -963,7 +963,7 @@ export default function ProdPage() {
                   color: '#666',
                   marginTop: '8px'
                 }}>
-                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} • Each chunk matches historical transactions
+                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} • Each part matches historical transactions
                 </div>
               </div>
             ) : splitPreview?.result?.error ? (
@@ -1057,7 +1057,7 @@ export default function ProdPage() {
                 ))}
             </div>
             <div style={{ fontSize: '10px', color: '#999', marginTop: '6px' }}>
-              Click to set as chunk size (total = chunk × {chunks} chunks)
+              Click to set as part size (total = part × {chunks} parts)
             </div>
           </div>
         )}

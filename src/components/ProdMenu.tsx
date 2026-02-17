@@ -302,7 +302,7 @@ export default function ProdMenu({
                           
                           <div style={{ color: '#666', marginTop: '6px', fontSize: '11px' }}>
                             <div>Amount: {formatSolAmount(params.amount, solPrice, 6)}</div>
-                            <div>Chunks: {params.numChunks}</div>
+                            <div>Parts: {params.numChunks}</div>
                             <div>Step: {session.current_step} / 13</div>
                           </div>
 

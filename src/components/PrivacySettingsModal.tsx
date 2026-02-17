@@ -51,7 +51,7 @@ export default function PrivacySettingsModal({
   };
 
   const formatTime = () => {
-    if (timeMinutes === 0) return '0 min';
+    if (timeMinutes === 0) return '<1 min';
     const hours = Math.floor(timeMinutes / 60);
     const mins = timeMinutes % 60;
     if (hours === 0) return `${timeMinutes} min`;
@@ -127,7 +127,7 @@ export default function PrivacySettingsModal({
             fontSize: '14px',
             fontWeight: '500'
           }}>
-            Number of Chunks: {chunks}
+            Number of Parts: {chunks}
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '12px', color: '#666', minWidth: '20px' }}>2</span>
@@ -146,7 +146,7 @@ export default function PrivacySettingsModal({
             color: '#999',
             marginTop: '4px'
           }}>
-            More chunks = more privacy, but higher fees
+            More parts = more privacy, but higher fees
           </div>
         </div>
 
@@ -162,7 +162,7 @@ export default function PrivacySettingsModal({
             Privacy Delay: {formatTime()}
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '12px', color: '#666', minWidth: '40px' }}>0 min</span>
+            <span style={{ fontSize: '12px', color: '#666', minWidth: '40px' }}>&lt;1 min</span>
             <input
               type="range"
               min={0}

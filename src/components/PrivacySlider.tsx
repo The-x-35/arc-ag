@@ -17,7 +17,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
   const timeMins = timeMinutes % 60;
   
   const formatTime = () => {
-    if (timeMinutes === 0) return '0 min';
+    if (timeMinutes === 0) return '<1 min';
     if (timeHours === 0) return `${timeMinutes} min`;
     if (timeMins === 0) return `${timeHours} hr`;
     return `${timeHours} hr ${timeMins} min`;
@@ -35,7 +35,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
         marginBottom: '12px'
       }}>
         <label style={{ 
-          color: '#fff', 
+          color: '#000', 
           fontSize: '14px', 
           fontWeight: '600'
         }}>
@@ -51,7 +51,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
             fontSize: '13px',
             fontFamily: 'monospace'
           }}>
-            {chunks} chunks, {formatTime()}
+            {chunks} parts, {formatTime()}
           </span>
           {onSettingsClick && (
             <button
@@ -133,8 +133,8 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
         fontSize: '11px',
         color: '#666'
       }}>
-        <span>Low Privacy (2 chunks, 0 min)</span>
-        <span>High Privacy (10 chunks, 4 hr)</span>
+        <span>Low Privacy (2 parts, &lt;1 min)</span>
+        <span>High Privacy (10 parts, 4 hr)</span>
       </div>
     </div>
   );
