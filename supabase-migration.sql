@@ -58,3 +58,43 @@ CREATE POLICY "Users can delete their own sessions"
   ON transaction_sessions
   FOR DELETE
   USING (true); -- For now, allow all deletes
+
+-- Create invite_codes table
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT NOT NULL UNIQUE,
+  wallet_address TEXT,
+  is_used BOOLEAN NOT NULL DEFAULT FALSE,
+  used_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create index on code for fast lookups
+CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
+
+-- Create index on wallet_address for lookups
+CREATE INDEX IF NOT EXISTS idx_invite_codes_wallet_address ON invite_codes(wallet_address);
+
+-- Create index on is_used for filtering
+CREATE INDEX IF NOT EXISTS idx_invite_codes_is_used ON invite_codes(is_used);
+
+-- Enable Row Level Security for invite_codes
+ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY;
+
+-- Create policy: Allow all reads (for validation)
+CREATE POLICY "Anyone can view invite codes"
+  ON invite_codes
+  FOR SELECT
+  USING (true);
+
+-- Create policy: Allow inserts (for generating codes)
+CREATE POLICY "Anyone can insert invite codes"
+  ON invite_codes
+  FOR INSERT
+  WITH CHECK (true);
+
+-- Create policy: Allow updates (for claiming codes)
+CREATE POLICY "Anyone can update invite codes"
+  ON invite_codes
+  FOR UPDATE
+  USING (true);

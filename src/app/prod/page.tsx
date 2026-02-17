@@ -89,10 +89,62 @@ export default function ProdPage() {
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
   const [recovering, setRecovering] = useState(false);
   
+  // Invite code state
+  const [inviteCode, setInviteCode] = useState('');
+  const [inviteCodeValidated, setInviteCodeValidated] = useState(false);
+  const [validatingInviteCode, setValidatingInviteCode] = useState(false);
+  const [inviteCodeError, setInviteCodeError] = useState<string | null>(null);
+  
   // Initialize connection
   useEffect(() => {
     connectionRef.current = new Connection(getSolanaRpc('mainnet'), 'confirmed');
   }, []);
+
+  // Check if wallet already has a validated invite code
+  useEffect(() => {
+    async function checkWalletInviteCode() {
+      if (!publicKey) {
+        setInviteCodeValidated(false);
+        return;
+      }
+
+      const walletAddress = publicKey.toBase58();
+
+      // First check localStorage for quick check
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('vpm_invite_validated');
+        const storedWallet = localStorage.getItem('vpm_invite_wallet');
+        if (stored === 'true' && storedWallet === walletAddress) {
+          setInviteCodeValidated(true);
+          return;
+        }
+      }
+
+      // Verify with database
+      try {
+        const response = await fetch(`/api/invite/check?walletAddress=${encodeURIComponent(walletAddress)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.hasInviteCode) {
+            setInviteCodeValidated(true);
+            // Store in localStorage
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('vpm_invite_validated', 'true');
+              localStorage.setItem('vpm_invite_wallet', walletAddress);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking wallet invite code:', error);
+      }
+    }
+
+    if (connected && publicKey) {
+      checkWalletInviteCode();
+    } else {
+      setInviteCodeValidated(false);
+    }
+  }, [connected, publicKey]);
   
   // Check for active session on mount
   useEffect(() => {
@@ -280,6 +332,64 @@ export default function ProdPage() {
     }
   }, [recoverAndContinue]);
   
+  // Validate invite code format
+  const isValidCodeFormat = useCallback((code: string): boolean => {
+    if (!code || code.length !== 6) {
+      return false;
+    }
+    return /^[A-Z0-9]{6}$/.test(code.toUpperCase());
+  }, []);
+
+  // Handle invite code validation
+  const handleInviteCodeSubmit = useCallback(async () => {
+    if (!publicKey) {
+      setInviteCodeError('Please connect your wallet first');
+      return;
+    }
+
+    const normalizedCode = inviteCode.toUpperCase().trim();
+    
+    if (!isValidCodeFormat(normalizedCode)) {
+      setInviteCodeError('Invalid code format. Code must be exactly 6 characters (A-Z, 0-9)');
+      return;
+    }
+
+    setValidatingInviteCode(true);
+    setInviteCodeError(null);
+
+    try {
+      const response = await fetch('/api/invite/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: normalizedCode,
+          walletAddress: publicKey.toBase58(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setInviteCodeValidated(true);
+        setInviteCodeError(null);
+        // Store in localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('vpm_invite_validated', 'true');
+          localStorage.setItem('vpm_invite_wallet', publicKey.toBase58());
+        }
+      } else {
+        setInviteCodeError(data.error || 'Failed to validate invite code');
+      }
+    } catch (error: any) {
+      console.error('Error validating invite code:', error);
+      setInviteCodeError('Failed to validate invite code. Please try again.');
+    } finally {
+      setValidatingInviteCode(false);
+    }
+  }, [inviteCode, publicKey, isValidCodeFormat]);
+
   // Handle settings save
   const handleSettingsSave = useCallback((newChunks: number, newTimeMinutes: number) => {
     // Calculate slider value from chunks and time
@@ -362,8 +472,153 @@ export default function ProdPage() {
       margin: '0 auto',
       background: '#fff'
     }}>
-      {/* Recovery Prompt */}
-      {showRecoveryPrompt && connected && (
+      {/* Wallet Connect Screen - Show if not connected and not validated */}
+      {!connected && !inviteCodeValidated && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80vh',
+          gap: '24px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
+            <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+          </div>
+          <p style={{ color: '#666', fontSize: '16px', textAlign: 'center', marginBottom: '16px' }}>
+            Connect your Solana wallet to continue
+          </p>
+          <WalletMultiButton style={{
+            background: '#000',
+            borderRadius: '8px',
+            height: '48px',
+            fontSize: '16px',
+            fontWeight: '600'
+          }} />
+        </div>
+      )}
+
+      {/* Invite Code Input Screen - Show if connected but not validated */}
+      {connected && !inviteCodeValidated && publicKey && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80vh',
+          gap: '24px',
+          maxWidth: '400px',
+          margin: '0 auto'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
+            <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+          </div>
+          <div style={{
+            background: '#f5f5f5',
+            border: '1px solid #ddd',
+            borderRadius: '12px',
+            padding: '32px',
+            width: '100%'
+          }}>
+            <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#000', marginBottom: '8px', textAlign: 'center' }}>
+              Enter Invite Code
+            </h2>
+            <p style={{ color: '#666', fontSize: '14px', textAlign: 'center', marginBottom: '24px' }}>
+              Please enter your 6-character invite code to access VPM
+            </p>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => {
+                  const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+                  setInviteCode(value);
+                  setInviteCodeError(null);
+                }}
+                placeholder="ABCD12"
+                disabled={validatingInviteCode}
+                style={{
+                  width: '100%',
+                  padding: '14px 16px',
+                  background: '#fff',
+                  border: `1px solid ${inviteCodeError ? '#ef4444' : '#ddd'}`,
+                  borderRadius: '8px',
+                  color: '#000',
+                  fontSize: '18px',
+                  textAlign: 'center',
+                  letterSpacing: '4px',
+                  fontFamily: 'monospace',
+                  fontWeight: '600',
+                  textTransform: 'uppercase'
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && inviteCode.length === 6) {
+                    handleInviteCodeSubmit();
+                  }
+                }}
+              />
+              {inviteCodeError && (
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: '#fef2f2',
+                  border: '1px solid #ef4444',
+                  borderRadius: '6px',
+                  color: '#ef4444',
+                  fontSize: '13px',
+                  textAlign: 'center'
+                }}>
+                  {inviteCodeError}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleInviteCodeSubmit}
+              disabled={validatingInviteCode || inviteCode.length !== 6}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: inviteCode.length === 6 && !validatingInviteCode ? '#000' : '#ccc',
+                border: 'none',
+                borderRadius: '8px',
+                color: '#fff',
+                fontSize: '16px',
+                fontWeight: '600',
+                cursor: inviteCode.length === 6 && !validatingInviteCode ? 'pointer' : 'not-allowed',
+                opacity: inviteCode.length === 6 && !validatingInviteCode ? 1 : 0.6
+              }}
+            >
+              {validatingInviteCode ? 'Validating...' : 'Submit'}
+            </button>
+
+            <div style={{
+              marginTop: '16px',
+              padding: '12px',
+              background: '#fff',
+              borderRadius: '8px',
+              border: '1px solid #ddd',
+              fontSize: '12px',
+              color: '#666',
+              textAlign: 'center'
+            }}>
+              <div style={{ fontFamily: 'monospace', fontSize: '11px', color: '#999', marginBottom: '4px' }}>
+                Connected: {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Form - Show only if validated */}
+      {inviteCodeValidated && (
+        <>
+          {/* Recovery Prompt */}
+          {showRecoveryPrompt && connected && (
         <div style={{
           marginBottom: '24px',
           padding: '16px',
@@ -1047,6 +1302,8 @@ export default function ProdPage() {
         onPoolsChange={setSelectedPools}
         availablePools={pools}
       />
+        </>
+      )}
     </main>
   );
 }

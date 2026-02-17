@@ -34,3 +34,12 @@ export interface TransactionSession {
   created_at: string;
   updated_at: string;
 }
+
+export interface InviteCode {
+  id: string;
+  code: string;
+  wallet_address: string | null;
+  is_used: boolean;
+  used_at: string | null;
+  created_at: string;
+}
