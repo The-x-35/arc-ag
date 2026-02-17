@@ -59,10 +59,10 @@ export default function ProdMenu({
         onClick={() => setIsOpen(!isOpen)}
         style={{
           padding: '8px',
-          background: isOpen ? '#3b82f6' : 'transparent',
-          border: '1px solid #444',
+          background: isOpen ? '#000' : 'transparent',
+          border: '1px solid #ddd',
           borderRadius: '6px',
-          color: '#fff',
+          color: '#000',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -99,13 +99,13 @@ export default function ProdMenu({
             position: 'absolute',
             top: '44px',
             right: 0,
-            background: '#111',
-            border: '1px solid #333',
+            background: '#f5f5f5',
+            border: '1px solid #ddd',
             borderRadius: '8px',
             minWidth: '280px',
             maxWidth: '400px',
             zIndex: 999,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
           }}>
             {/* Menu Items */}
             <div style={{ padding: '8px' }}>
@@ -122,7 +122,7 @@ export default function ProdMenu({
                     background: 'transparent',
                     border: 'none',
                     borderRadius: '6px',
-                    color: '#fff',
+                    color: '#000',
                     fontSize: '14px',
                     textAlign: 'left',
                     cursor: 'pointer',
@@ -131,7 +131,7 @@ export default function ProdMenu({
                     gap: '12px'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#222';
+                    e.currentTarget.style.background = '#e5e5e5';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = 'transparent';
@@ -155,7 +155,7 @@ export default function ProdMenu({
                     background: 'transparent',
                     border: 'none',
                     borderRadius: '6px',
-                    color: '#fff',
+                    color: '#000',
                     fontSize: '14px',
                     textAlign: 'left',
                     cursor: 'pointer',
@@ -164,7 +164,7 @@ export default function ProdMenu({
                     gap: '12px'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#222';
+                    e.currentTarget.style.background = '#e5e5e5';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = 'transparent';
@@ -182,10 +182,10 @@ export default function ProdMenu({
                   style={{
                     width: '100%',
                     padding: '12px',
-                    background: showSessions ? '#222' : 'transparent',
+                    background: showSessions ? '#e5e5e5' : 'transparent',
                     border: 'none',
                     borderRadius: '6px',
-                    color: '#fff',
+                    color: '#000',
                     fontSize: '14px',
                     textAlign: 'left',
                     cursor: 'pointer',
@@ -196,7 +196,7 @@ export default function ProdMenu({
                   }}
                   onMouseEnter={(e) => {
                     if (!showSessions) {
-                      e.currentTarget.style.background = '#222';
+                      e.currentTarget.style.background = '#e5e5e5';
                     }
                   }}
                   onMouseLeave={(e) => {
@@ -217,7 +217,7 @@ export default function ProdMenu({
             {/* Sessions List */}
             {showSessions && connected && publicKey && (
               <div style={{
-                borderTop: '1px solid #333',
+                borderTop: '1px solid #ddd',
                 padding: '8px',
                 maxHeight: '400px',
                 overflowY: 'auto'
@@ -226,7 +226,7 @@ export default function ProdMenu({
                   <div style={{
                     padding: '20px',
                     textAlign: 'center',
-                    color: '#888',
+                    color: '#666',
                     fontSize: '13px'
                   }}>
                     Loading sessions...
@@ -235,7 +235,7 @@ export default function ProdMenu({
                   <div style={{
                     padding: '20px',
                     textAlign: 'center',
-                    color: '#666',
+                    color: '#999',
                     fontSize: '13px'
                   }}>
                     No sessions found
@@ -258,8 +258,8 @@ export default function ProdMenu({
                           key={session.id}
                           style={{
                             padding: '10px',
-                            background: '#0a0a0a',
-                            border: `1px solid ${statusColors[session.status] || '#333'}`,
+                            background: '#fafafa',
+                            border: `1px solid ${statusColors[session.status] || '#ccc'}`,
                             borderRadius: '6px',
                             fontSize: '12px',
                             cursor: (session.status === 'pending' || session.status === 'in_progress') ? 'pointer' : 'default'
@@ -271,35 +271,36 @@ export default function ProdMenu({
                           }}
                           onMouseEnter={(e) => {
                             if (session.status === 'pending' || session.status === 'in_progress') {
-                              e.currentTarget.style.background = '#1a1a1a';
+                              e.currentTarget.style.background = '#f0f0f0';
                             }
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = '#0a0a0a';
+                            e.currentTarget.style.background = '#fafafa';
                           }}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '6px' }}>
                             <div style={{ flex: 1 }}>
-                              <div style={{ color: '#fff', fontWeight: '600', marginBottom: '2px' }}>
+                              <div style={{ color: '#000', fontWeight: '600', marginBottom: '2px' }}>
                                 {date.toLocaleString()}
                               </div>
-                              <div style={{ color: '#888', fontSize: '11px', fontFamily: 'monospace' }}>
+                              <div style={{ color: '#666', fontSize: '11px', fontFamily: 'monospace' }}>
                                 {session.id.slice(0, 8)}...{session.id.slice(-8)}
                               </div>
                             </div>
                             <span style={{
                               padding: '2px 6px',
-                              background: statusColors[session.status] || '#666',
+                              background: statusColors[session.status] || '#999',
                               borderRadius: '4px',
                               fontSize: '10px',
                               fontWeight: '600',
-                              textTransform: 'uppercase'
+                              textTransform: 'uppercase',
+                              color: '#fff'
                             }}>
                               {session.status}
                             </span>
                           </div>
                           
-                          <div style={{ color: '#888', marginTop: '6px', fontSize: '11px' }}>
+                          <div style={{ color: '#666', marginTop: '6px', fontSize: '11px' }}>
                             <div>Amount: {formatSolAmount(params.amount, solPrice, 6)}</div>
                             <div>Chunks: {params.numChunks}</div>
                             <div>Step: {session.current_step} / 13</div>
@@ -309,7 +310,7 @@ export default function ProdMenu({
                             <div style={{
                               marginTop: '6px',
                               padding: '4px 8px',
-                              background: '#3b82f6',
+                              background: '#000',
                               borderRadius: '4px',
                               fontSize: '11px',
                               color: '#fff',

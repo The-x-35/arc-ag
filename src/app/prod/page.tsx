@@ -27,6 +27,7 @@ export default function ProdPage() {
   // Form state
   const [destination, setDestination] = useState('');
   const [amount, setAmount] = useState('');
+  const [amountUnit, setAmountUnit] = useState<'SOL' | 'USD'>('SOL');
   
   // Privacy slider state (0-100, maps to 2-10 chunks and 0-240 min)
   const [privacySliderValue, setPrivacySliderValue] = useState(25); // Default: ~4 chunks, ~60 min
@@ -82,6 +83,7 @@ export default function ProdPage() {
   // Max transaction limit in USD (prod)
   const MAX_USD = 1000;
   const maxSolAmount = solPrice ? MAX_USD / solPrice : null;
+  const maxUsdAmount = MAX_USD;
   
   // Recovery state
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
@@ -183,10 +185,15 @@ export default function ProdPage() {
   
   // Debounced amount change handler
   useEffect(() => {
-    const amountNum = parseFloat(amount);
-    if (amountNum > 0) {
+    const inputNum = parseFloat(amount);
+    const amountSol = amountUnit === 'SOL'
+      ? inputNum
+      : solPrice
+        ? inputNum / solPrice
+        : 0;
+    if (amountSol > 0) {
       const timer = setTimeout(() => {
-        computeSplitPreview(amountNum, chunks);
+        computeSplitPreview(amountSol, chunks);
       }, 300);
       return () => clearTimeout(timer);
     } else {
@@ -197,16 +204,37 @@ export default function ProdPage() {
         suggestions: [],
       }));
     }
-  }, [amount, chunks, computeSplitPreview]);
+  }, [amount, amountUnit, solPrice, chunks, computeSplitPreview]);
   
   // Handle selecting a suggested amount
   const handleSelectSuggestion = useCallback((sol: number) => {
-    if (maxSolAmount && sol > maxSolAmount) {
-      setAmount(maxSolAmount.toString());
-    } else {
-      setAmount(sol.toString());
+    let clampedSol = sol;
+    if (maxSolAmount && clampedSol > maxSolAmount) {
+      clampedSol = maxSolAmount;
     }
-  }, [maxSolAmount]);
+    if (amountUnit === 'USD' && solPrice) {
+      setAmount((clampedSol * solPrice).toString());
+    } else {
+      setAmount(clampedSol.toString());
+    }
+  }, [amountUnit, solPrice, maxSolAmount]);
+
+  const handleAmountUnitChange = useCallback((unit: 'SOL' | 'USD') => {
+    if (unit === amountUnit) return;
+    if (unit === 'USD' && !solPrice) return;
+    
+    const current = parseFloat(amount);
+    let next = current;
+    if (!Number.isNaN(current) && solPrice) {
+      if (amountUnit === 'SOL' && unit === 'USD') {
+        next = current * solPrice;
+      } else if (amountUnit === 'USD' && unit === 'SOL') {
+        next = current / solPrice;
+      }
+    }
+    setAmountUnit(unit);
+    setAmount(Number.isNaN(next) ? '' : next.toString());
+  }, [amount, amountUnit, solPrice]);
   
   // Handle recovery
   const handleRecover = useCallback(async () => {
@@ -266,14 +294,19 @@ export default function ProdPage() {
   
   // Handle submit
   const handleSubmit = async () => {
-    const amountNum = parseFloat(amount);
+    const inputNum = parseFloat(amount);
+    const amountSol = amountUnit === 'SOL'
+      ? inputNum
+      : solPrice
+        ? inputNum / solPrice
+        : 0;
     const minAmount = 0.035 * chunks;
-    if (amountNum < minAmount) return;
-    if (maxSolAmount && amountNum > maxSolAmount) return;
+    if (amountSol < minAmount) return;
+    if (maxSolAmount && amountSol > maxSolAmount) return;
     
     try {
       let exactChunks: number[] | undefined;
-      let sendAmount = amountNum;
+      let sendAmount = amountSol;
       
       if (splitPreview.result?.valid && splitPreview.result.chunks.length > 0) {
         exactChunks = splitPreview.result.chunks.map(c => c.lamports);
@@ -294,11 +327,32 @@ export default function ProdPage() {
     }
   };
   
-  const amountNum = parseFloat(amount) || 0;
+  const inputNum = parseFloat(amount) || 0;
+  const amountSolForUi = amountUnit === 'SOL'
+    ? inputNum
+    : solPrice
+      ? inputNum / solPrice
+      : 0;
   const minAmount = 0.035 * chunks;
-  const meetsMinimum = amountNum >= minAmount;
-  const underMax = !maxSolAmount || amountNum <= maxSolAmount;
+  const meetsMinimum = amountSolForUi >= minAmount;
+  const underMax = !maxSolAmount || amountSolForUi <= maxSolAmount;
   const isFormValid = connected && destination && amount && meetsMinimum && underMax && !loading;
+  
+  // Display-only equivalent for the other currency
+  const equivalentText = (() => {
+    if (!solPrice || !amount) return '';
+    if (!isFinite(inputNum) || inputNum <= 0) return '';
+    
+    if (amountUnit === 'SOL') {
+      const usd = amountSolForUi * solPrice;
+      if (!isFinite(usd)) return '';
+      return `($${usd.toFixed(2)})`;
+    } else {
+      const sol = inputNum / solPrice;
+      if (!isFinite(sol)) return '';
+      return `(${sol.toFixed(4)} SOL)`;
+    }
+  })();
   
   return (
     <main style={{ 
@@ -306,15 +360,15 @@ export default function ProdPage() {
       padding: '24px', 
       maxWidth: '800px', 
       margin: '0 auto',
-      background: '#000'
+      background: '#fff'
     }}>
       {/* Recovery Prompt */}
       {showRecoveryPrompt && connected && (
         <div style={{
           marginBottom: '24px',
           padding: '16px',
-          background: '#1a1a2e',
-          border: '1px solid #3b82f6',
+          background: '#f5f5f5',
+          border: '1px solid #000',
           borderRadius: '8px',
           display: 'flex',
           justifyContent: 'space-between',
@@ -322,10 +376,10 @@ export default function ProdPage() {
           gap: '16px'
         }}>
           <div style={{ flex: 1 }}>
-            <div style={{ color: '#fff', fontWeight: '600', marginBottom: '4px' }}>
+            <div style={{ color: '#000', fontWeight: '600', marginBottom: '4px' }}>
               Active Session Found
             </div>
-            <div style={{ color: '#888', fontSize: '13px' }}>
+            <div style={{ color: '#666', fontSize: '13px' }}>
               You have an active transaction session. Would you like to recover and continue?
             </div>
           </div>
@@ -335,7 +389,7 @@ export default function ProdPage() {
               disabled={recovering}
               style={{
                 padding: '8px 16px',
-                background: '#3b82f6',
+                background: '#000',
                 border: 'none',
                 borderRadius: '6px',
                 color: '#fff',
@@ -352,10 +406,10 @@ export default function ProdPage() {
               disabled={recovering}
               style={{
                 padding: '8px 16px',
-                background: '#222',
-                border: '1px solid #444',
+                background: '#e5e5e5',
+                border: '1px solid #ccc',
                 borderRadius: '6px',
-                color: '#fff',
+                color: '#000',
                 cursor: recovering ? 'not-allowed' : 'pointer',
                 fontSize: '13px'
               }}
@@ -373,9 +427,12 @@ export default function ProdPage() {
         alignItems: 'center',
         marginBottom: '32px',
         paddingBottom: '16px',
-        borderBottom: '1px solid #333'
+        borderBottom: '1px solid #ddd'
       }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#fff' }}>Private Send</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <img src="/image.png" alt="VPM Logo" style={{ height: '32px', width: 'auto' }} />
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+        </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <ProdMenu
             onShowBurners={() => setShowBurnerWallets(!showBurnerWallets)}
@@ -387,8 +444,8 @@ export default function ProdPage() {
       
       {/* Main Form */}
       <div style={{
-        background: '#111',
-        border: '1px solid #333',
+        background: '#f5f5f5',
+        border: '1px solid #ddd',
         borderRadius: '12px',
         padding: '24px',
         marginBottom: '24px'
@@ -398,21 +455,21 @@ export default function ProdPage() {
           {connected && publicKey ? (
             <div style={{
               padding: '12px',
-              background: '#000',
+              background: '#fff',
               borderRadius: '8px',
-              border: '1px solid #333',
+              border: '1px solid #ddd',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
               <div>
-                <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Connected</div>
-                <div style={{ fontFamily: 'monospace', fontSize: '13px', color: '#22c55e' }}>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Connected</div>
+                <div style={{ fontFamily: 'monospace', fontSize: '13px', color: '#000' }}>
                   {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
                 </div>
               </div>
               <WalletMultiButton style={{
-                background: '#333',
+                background: '#ddd',
                 borderRadius: '6px',
                 height: '32px',
                 fontSize: '12px'
@@ -421,13 +478,13 @@ export default function ProdPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
               <WalletMultiButton style={{
-                background: '#3b82f6',
+                background: '#000',
                 borderRadius: '8px',
                 height: '44px',
                 fontSize: '14px',
                 fontWeight: '600'
               }} />
-              <span style={{ fontSize: '12px', color: '#666' }}>
+              <span style={{ fontSize: '12px', color: '#999' }}>
                 Connect your Solana wallet
               </span>
             </div>
@@ -436,7 +493,7 @@ export default function ProdPage() {
         
         {/* Destination */}
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ color: '#fff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+          <label style={{ color: '#000', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
             Destination Address
           </label>
           <input
@@ -449,10 +506,10 @@ export default function ProdPage() {
             style={{
               width: '100%',
               padding: '12px 16px',
-              background: '#000',
-              border: '1px solid #333',
+              background: '#fff',
+              border: '1px solid #ddd',
               borderRadius: '8px',
-              color: '#fff',
+              color: '#000',
               fontSize: '14px'
             }}
           />
@@ -460,38 +517,124 @@ export default function ProdPage() {
         
         {/* Amount */}
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ color: '#fff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Amount (SOL)
+          <label style={{ color: '#000', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+            Amount
           </label>
-          <input
-            type="number"
-            step="0.01"
-            min="0.07"
-            max={maxSolAmount ?? undefined}
-            value={amount}
-            onChange={(e) => {
-              const next = e.target.value;
-              const num = parseFloat(next);
-              if (maxSolAmount && !Number.isNaN(num) && num > maxSolAmount) {
-                setAmount(maxSolAmount.toString());
-              } else {
-                setAmount(next);
-              }
-            }}
-            placeholder="Enter amount"
-            disabled={loading}
-            required
-            style={{
-              width: '100%',
-              padding: '12px 16px',
-              background: '#000',
-              border: `1px solid ${splitPreview?.result?.valid ? '#22c55e' : splitPreview?.result?.error ? '#ef4444' : '#333'}`,
-              borderRadius: '8px',
-              color: '#fff',
-              fontSize: '14px'
-            }}
-          />
-          <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* SOL / USD switch on the left */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '4px',
+                background: '#fff',
+                padding: '2px',
+                borderRadius: '999px',
+                border: '1px solid #ddd'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => handleAmountUnitChange('SOL')}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '999px',
+                  border: 'none',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  background: amountUnit === 'SOL' ? '#000' : 'transparent',
+                  color: amountUnit === 'SOL' ? '#fff' : '#666',
+                  minWidth: '36px'
+                }}
+              >
+                SOL
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAmountUnitChange('USD')}
+                disabled={!solPrice}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '999px',
+                  border: 'none',
+                  fontSize: '11px',
+                  cursor: !solPrice ? 'not-allowed' : 'pointer',
+                  background: amountUnit === 'USD' ? '#000' : 'transparent',
+                  color: !solPrice ? '#ccc' : amountUnit === 'USD' ? '#fff' : '#666',
+                  minWidth: '36px',
+                  opacity: !solPrice ? 0.5 : 1
+                }}
+              >
+                $
+              </button>
+            </div>
+
+            {/* Amount input on the right */}
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="number"
+                step="0.01"
+                min={amountUnit === 'SOL' ? 0.07 : solPrice ? (0.07 * solPrice).toFixed(2) : undefined}
+                max={amountUnit === 'SOL' ? maxSolAmount ?? undefined : maxUsdAmount}
+                value={amount}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const num = parseFloat(next);
+                  if (Number.isNaN(num)) {
+                    setAmount(next);
+                    return;
+                  }
+                  if (amountUnit === 'SOL') {
+                    if (maxSolAmount && num > maxSolAmount) {
+                      setAmount(maxSolAmount.toString());
+                    } else {
+                      setAmount(next);
+                    }
+                  } else {
+                    if (num > maxUsdAmount) {
+                      setAmount(maxUsdAmount.toString());
+                    } else {
+                      setAmount(next);
+                    }
+                  }
+                }}
+                placeholder={amountUnit === 'SOL' ? 'Enter amount in SOL' : 'Enter amount in USD'}
+                disabled={loading || (amountUnit === 'USD' && !solPrice)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 80px 12px 16px',
+                  background: '#fff',
+                  border: `1px solid ${splitPreview?.result?.valid ? '#22c55e' : splitPreview?.result?.error ? '#ef4444' : '#ddd'}`,
+                  borderRadius: '8px',
+                  color: '#000',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              {equivalentText && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    right: '16px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: '11px',
+                    color: '#999',
+                    pointerEvents: 'none',
+                    fontFamily: 'monospace',
+                    maxWidth: '70px',
+                    textAlign: 'right',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {equivalentText}
+                </span>
+              )}
+            </div>
+          </div>
+          <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
             Min {formatSolAmount(0.035 * chunks, solPrice, 2)} ({chunks} × {formatSolAmount(0.035, solPrice, 3)} per chunk)
             {maxSolAmount && (
               <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)} (USD ${MAX_USD.toFixed(0)})</>
@@ -505,11 +648,11 @@ export default function ProdPage() {
             {splitPreview?.loading ? (
               <div style={{ 
                 padding: '16px',
-                background: '#0a0a0a',
+                background: '#fafafa',
                 borderRadius: '8px',
-                border: '1px solid #333',
+                border: '1px solid #ddd',
                 textAlign: 'center',
-                color: '#888',
+                color: '#666',
                 fontSize: '13px'
               }}>
                 Calculating optimal split...
@@ -517,9 +660,9 @@ export default function ProdPage() {
             ) : splitPreview?.result?.valid ? (
               <div style={{ 
                 padding: '12px',
-                background: '#001a00',
+                background: '#f0fdf4',
                 borderRadius: '8px',
-                border: '1px solid #0a3a0a'
+                border: '1px solid #22c55e'
               }}>
                 <div style={{ 
                   display: 'flex', 
@@ -543,17 +686,17 @@ export default function ProdPage() {
                       key={i}
                       style={{ 
                         padding: '6px 10px',
-                        background: '#0a2a0a',
+                        background: '#dcfce7',
                         borderRadius: '4px',
                         fontSize: '12px',
                         fontFamily: 'monospace',
-                        color: '#4ade80',
-                        border: '1px solid #1a4a1a'
+                        color: '#166534',
+                        border: '1px solid #22c55e'
                       }}
                     >
                       {formatSolAmount(chunk.sol, solPrice, 6)}
                       {chunk.isHistorical && chunk.frequency && (
-                        <span style={{ marginLeft: '4px', fontSize: '10px', color: '#888' }}>
+                        <span style={{ marginLeft: '4px', fontSize: '10px', color: '#666' }}>
                           ({chunk.frequency}×)
                         </span>
                       )}
@@ -562,7 +705,7 @@ export default function ProdPage() {
                 </div>
                 <div style={{ 
                   fontSize: '11px', 
-                  color: '#888',
+                  color: '#666',
                   marginTop: '8px'
                 }}>
                   Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} • Each chunk matches historical transactions
@@ -571,9 +714,9 @@ export default function ProdPage() {
             ) : splitPreview?.result?.error ? (
               <div style={{ 
                 padding: '12px',
-                background: meetsMinimum ? '#2a1a00' : '#1a0000',
+                background: '#fef2f2',
                 borderRadius: '8px',
-                border: `1px solid ${meetsMinimum ? '#5a3a00' : '#3a0a0a'}`
+                border: '1px solid #ef4444'
               }}>
                 <div style={{ 
                   display: 'flex', 
@@ -581,51 +724,16 @@ export default function ProdPage() {
                   gap: '8px',
                   marginBottom: '8px'
                 }}>
-                  <span style={{ color: meetsMinimum ? '#f59e0b' : '#ef4444', fontSize: '16px' }}>
-                    {meetsMinimum ? '⚠' : '✗'}
+                  <span style={{ color: '#ef4444', fontSize: '16px' }}>
+                    ✗
                   </span>
-                  <span style={{ color: meetsMinimum ? '#f59e0b' : '#ef4444', fontSize: '13px' }}>
-                    {splitPreview.result.error}
+                  <span style={{ color: '#ef4444', fontSize: '13px' }}>
+                    This amount is not secure to send based on historical transactions.
                   </span>
                 </div>
-                
-                {!meetsMinimum && (
-                  <div style={{ 
-                    marginTop: '8px',
-                    padding: '8px',
-                    background: '#2a0000',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    color: '#ef4444'
-                  }}>
-                    ⚠ Amount below recommended minimum ({formatSolAmount(minAmount, solPrice, 3)} for {chunks} chunks)
-                    <br />
-                    <span style={{ color: '#888', fontSize: '11px' }}>
-                      Each chunk will be {formatSolAmount(amountNum / chunks, solPrice, 6)} (minimum recommended: {formatSolAmount(0.035, solPrice, 3)} per chunk)
-                    </span>
-                  </div>
-                )}
-                
-                {meetsMinimum && (
-                  <div style={{ 
-                    marginTop: '8px',
-                    padding: '8px',
-                    background: '#1a0a00',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    color: '#f59e0b'
-                  }}>
-                    ⚠ Custom amount: Will split equally into {chunks} chunks of {formatSolAmount(amountNum / chunks, solPrice, 6)} each
-                    <br />
-                    <span style={{ color: '#888', fontSize: '11px' }}>
-                      This may reduce privacy compared to using exact historical amounts
-                    </span>
-                  </div>
-                )}
-                
                 {splitPreview?.suggestions && splitPreview.suggestions.length > 0 && (
                   <div style={{ marginTop: '12px' }}>
-                    <div style={{ color: '#888', fontSize: '12px', marginBottom: '8px' }}>
+                    <div style={{ color: '#666', fontSize: '12px', marginBottom: '8px' }}>
                       Suggested amounts (click to use):
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -637,18 +745,17 @@ export default function ProdPage() {
                           disabled={loading}
                           style={{
                             padding: '8px 12px',
-                            background: '#222',
-                            border: '1px solid #444',
+                            background: '#e5e5e5',
+                            border: '1px solid #ccc',
                             borderRadius: '6px',
                             cursor: loading ? 'not-allowed' : 'pointer',
-                            color: '#fff',
+                            color: '#000',
                             fontSize: '12px',
                             opacity: loading ? 0.6 : 1
                           }}
                         >
-                          <div style={{ fontWeight: '600' }}>{formatSolAmount(suggestion.sol, solPrice, 6)}</div>
-                          <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
-                            {suggestion.chunks.map(c => formatSolAmount(c, solPrice, 6)).join(' + ')}
+                          <div style={{ fontWeight: '600' }}>
+                            {formatSolAmount(suggestion.sol, solPrice, 6)}
                           </div>
                         </button>
                       ))}
@@ -663,7 +770,7 @@ export default function ProdPage() {
         {/* Recommended Amounts */}
         {splitPreview?.availableAmounts && splitPreview.availableAmounts.length > 0 && (
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: '#888', display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+            <label style={{ color: '#666', display: 'block', marginBottom: '8px', fontSize: '12px' }}>
               Recommended amounts (from historical transactions):
             </label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -678,23 +785,23 @@ export default function ProdPage() {
                     disabled={loading}
                     style={{
                       padding: '6px 10px',
-                      background: amt.isHistorical ? '#1a1a2e' : '#1a1a1a',
-                      border: '1px solid #333',
+                      background: amt.isHistorical ? '#e5e5e5' : '#f5f5f5',
+                      border: '1px solid #ddd',
                       borderRadius: '4px',
                       cursor: loading ? 'not-allowed' : 'pointer',
-                      color: '#fff',
+                      color: '#000',
                       fontSize: '11px',
                       opacity: loading ? 0.6 : 1
                     }}
                   >
-                    {formatSolAmount(amt.sol, solPrice, 6)}
-                    <span style={{ color: '#666', marginLeft: '4px' }}>
+                    {formatSolAmount(amt.sol, solPrice, 3)}
+                    <span style={{ color: '#999', marginLeft: '4px' }}>
                       ({amt.frequency}×)
                     </span>
                   </button>
                 ))}
             </div>
-            <div style={{ fontSize: '10px', color: '#666', marginTop: '6px' }}>
+            <div style={{ fontSize: '10px', color: '#999', marginTop: '6px' }}>
               Click to set as chunk size (total = chunk × {chunks} chunks)
             </div>
           </div>
@@ -756,7 +863,7 @@ export default function ProdPage() {
               }}
               style={{
                 padding: '8px 16px',
-                background: '#3b82f6',
+                background: '#000',
                 border: 'none',
                 borderRadius: '6px',
                 color: '#fff',
@@ -778,7 +885,7 @@ export default function ProdPage() {
           style={{
             width: '100%',
             padding: '14px',
-            background: isFormValid ? '#3b82f6' : '#333',
+            background: isFormValid ? '#000' : '#ccc',
             color: '#fff',
             border: 'none',
             borderRadius: '8px',
@@ -791,7 +898,7 @@ export default function ProdPage() {
           {loading ? 'Processing...' : splitPreview?.result?.valid 
             ? `Send ${formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} Privately` 
             : meetsMinimum 
-              ? `Send ${formatSolAmount(amountNum, solPrice, 6)} (Custom Split)` 
+              ? `Send ${formatSolAmount(amountSolForUi, solPrice, 6)} (Custom Split)` 
               : 'Enter valid amount'}
         </button>
       </div>
@@ -799,8 +906,8 @@ export default function ProdPage() {
       {/* Burner Wallets Section */}
       {showBurnerWallets && burnerWallets && burnerWallets.length > 0 && (
         <div style={{
-          background: '#111',
-          border: '1px solid #333',
+          background: '#f5f5f5',
+          border: '1px solid #ddd',
           borderRadius: '12px',
           padding: '24px',
           marginBottom: '24px'
@@ -811,7 +918,7 @@ export default function ProdPage() {
             alignItems: 'center',
             marginBottom: '16px'
           }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#fff' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#000' }}>
               🔑 Burner Wallets
             </h3>
             <button
@@ -819,10 +926,10 @@ export default function ProdPage() {
               onClick={() => setShowBurnerWallets(false)}
               style={{
                 padding: '6px 12px',
-                background: '#222',
-                border: '1px solid #444',
+                background: '#e5e5e5',
+                border: '1px solid #ccc',
                 borderRadius: '6px',
-                color: '#fff',
+                color: '#000',
                 cursor: 'pointer',
                 fontSize: '12px'
               }}
@@ -834,8 +941,8 @@ export default function ProdPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {burnerWallets.map((burner, i) => (
               <div key={i} style={{
-                background: '#0a0a0a',
-                border: '1px solid #222',
+                background: '#fafafa',
+                border: '1px solid #ddd',
                 borderRadius: '8px',
                 padding: '12px'
               }}>
@@ -845,28 +952,28 @@ export default function ProdPage() {
                   alignItems: 'center',
                   marginBottom: '8px'
                 }}>
-                  <span style={{ fontWeight: '600', color: '#fff', fontSize: '13px' }}>
+                  <span style={{ fontWeight: '600', color: '#000', fontSize: '13px' }}>
                     {burner.index === 0 ? 'First Burner' : burner.index === -1 ? 'Final Burner' : `Burner ${burner.index}`}
                   </span>
                   <span style={{
                     padding: '2px 8px',
-                    background: '#1a1a2e',
+                    background: '#e5e5e5',
                     borderRadius: '4px',
                     fontSize: '10px',
-                    color: '#888'
+                    color: '#666'
                   }}>
                     EOA
                   </span>
                 </div>
                 
                 <div style={{ marginBottom: '8px' }}>
-                  <div style={{ fontSize: '10px', color: '#666', marginBottom: '2px' }}>Address</div>
+                  <div style={{ fontSize: '10px', color: '#999', marginBottom: '2px' }}>Address</div>
                   <div style={{
                     fontFamily: 'monospace',
                     fontSize: '10px',
-                    color: '#3b82f6',
+                    color: '#000',
                     wordBreak: 'break-all',
-                    background: '#000',
+                    background: '#fff',
                     padding: '6px',
                     borderRadius: '4px'
                   }}>
@@ -875,18 +982,18 @@ export default function ProdPage() {
                 </div>
                 
                 <div>
-                  <div style={{ fontSize: '10px', color: '#666', marginBottom: '2px' }}>
+                  <div style={{ fontSize: '10px', color: '#999', marginBottom: '2px' }}>
                     Private Key (Base58)
                   </div>
                   <div style={{
                     fontFamily: 'monospace',
                     fontSize: '9px',
-                    color: '#f59e0b',
+                    color: '#333',
                     wordBreak: 'break-all',
-                    background: '#0f0f00',
+                    background: '#f0f0f0',
                     padding: '6px',
                     borderRadius: '4px',
-                    border: '1px solid #332'
+                    border: '1px solid #ddd'
                   }}>
                     {burner.privateKey}
                   </div>
@@ -898,11 +1005,11 @@ export default function ProdPage() {
                     style={{
                       marginTop: '6px',
                       padding: '4px 8px',
-                      background: '#222',
-                      border: '1px solid #333',
+                      background: '#e5e5e5',
+                      border: '1px solid #ccc',
                       borderRadius: '4px',
                       fontSize: '10px',
-                      color: '#888',
+                      color: '#666',
                       cursor: 'pointer'
                     }}
                   >
@@ -918,7 +1025,7 @@ export default function ProdPage() {
                     display: 'inline-block',
                     marginTop: '8px',
                     fontSize: '10px',
-                    color: '#3b82f6'
+                    color: '#000'
                   }}
                 >
                   View on Solscan →

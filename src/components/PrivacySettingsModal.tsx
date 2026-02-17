@@ -66,7 +66,7 @@ export default function PrivacySettingsModal({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0, 0, 0, 0.8)',
+      background: 'rgba(0, 0, 0, 0.5)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -76,8 +76,8 @@ export default function PrivacySettingsModal({
     onClick={onClose}
     >
       <div style={{
-        background: '#111',
-        border: '1px solid #333',
+        background: '#fff',
+        border: '1px solid #ddd',
         borderRadius: '12px',
         padding: '24px',
         maxWidth: '500px',
@@ -96,7 +96,7 @@ export default function PrivacySettingsModal({
           <h2 style={{
             fontSize: '20px',
             fontWeight: '600',
-            color: '#fff',
+            color: '#000',
             margin: 0
           }}>
             Advanced Settings
@@ -107,9 +107,9 @@ export default function PrivacySettingsModal({
             style={{
               padding: '6px 12px',
               background: 'transparent',
-              border: '1px solid #444',
+              border: '1px solid #ccc',
               borderRadius: '6px',
-              color: '#888',
+              color: '#666',
               cursor: 'pointer',
               fontSize: '14px'
             }}
@@ -121,7 +121,7 @@ export default function PrivacySettingsModal({
         {/* Chunks Slider */}
         <div style={{ marginBottom: '24px' }}>
           <label style={{
-            color: '#fff',
+            color: '#000',
             display: 'block',
             marginBottom: '8px',
             fontSize: '14px',
@@ -130,7 +130,7 @@ export default function PrivacySettingsModal({
             Number of Chunks: {chunks}
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '12px', color: '#888', minWidth: '20px' }}>2</span>
+            <span style={{ fontSize: '12px', color: '#666', minWidth: '20px' }}>2</span>
             <input
               type="range"
               min={2}
@@ -139,11 +139,11 @@ export default function PrivacySettingsModal({
               onChange={(e) => setChunks(parseInt(e.target.value))}
               style={{ flex: 1 }}
             />
-            <span style={{ fontSize: '12px', color: '#888', minWidth: '20px' }}>10</span>
+            <span style={{ fontSize: '12px', color: '#666', minWidth: '20px' }}>10</span>
           </div>
           <div style={{
             fontSize: '11px',
-            color: '#666',
+            color: '#999',
             marginTop: '4px'
           }}>
             More chunks = more privacy, but higher fees
@@ -153,7 +153,7 @@ export default function PrivacySettingsModal({
         {/* Time Slider */}
         <div style={{ marginBottom: '24px' }}>
           <label style={{
-            color: '#fff',
+            color: '#000',
             display: 'block',
             marginBottom: '8px',
             fontSize: '14px',
@@ -162,7 +162,7 @@ export default function PrivacySettingsModal({
             Privacy Delay: {formatTime()}
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '12px', color: '#888', minWidth: '40px' }}>0 min</span>
+            <span style={{ fontSize: '12px', color: '#666', minWidth: '40px' }}>0 min</span>
             <input
               type="range"
               min={0}
@@ -172,11 +172,11 @@ export default function PrivacySettingsModal({
               onChange={(e) => setTimeMinutes(parseInt(e.target.value))}
               style={{ flex: 1 }}
             />
-            <span style={{ fontSize: '12px', color: '#888', minWidth: '50px' }}>4 hr</span>
+            <span style={{ fontSize: '12px', color: '#666', minWidth: '50px' }}>4 hr</span>
           </div>
           <div style={{
             fontSize: '11px',
-            color: '#666',
+            color: '#999',
             marginTop: '4px'
           }}>
             {timeMinutes === 0 
@@ -189,7 +189,7 @@ export default function PrivacySettingsModal({
         {availablePools.length > 0 && onPoolsChange && (
           <div style={{ marginBottom: '24px' }}>
             <label style={{
-              color: '#fff',
+              color: '#000',
               display: 'block',
               marginBottom: '8px',
               fontSize: '14px',
@@ -206,7 +206,7 @@ export default function PrivacySettingsModal({
                     alignItems: 'center',
                     gap: '8px',
                     padding: '8px',
-                    background: '#0a0a0a',
+                    background: '#fafafa',
                     borderRadius: '6px',
                     cursor: 'pointer',
                     opacity: pool.isAvailable ? 1 : 0.5
@@ -226,10 +226,10 @@ export default function PrivacySettingsModal({
                     style={{ cursor: 'pointer' }}
                   />
                   <div style={{ flex: 1 }}>
-                    <div style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>
+                    <div style={{ color: '#000', fontSize: '13px', fontWeight: '500' }}>
                       {pool.name}
                     </div>
-                    <div style={{ color: '#666', fontSize: '11px' }}>
+                    <div style={{ color: '#999', fontSize: '11px' }}>
                       {pool.description}
                     </div>
                   </div>
@@ -251,10 +251,10 @@ export default function PrivacySettingsModal({
             style={{
               flex: 1,
               padding: '12px',
-              background: '#222',
-              border: '1px solid #444',
+              background: '#e5e5e5',
+              border: '1px solid #ccc',
               borderRadius: '8px',
-              color: '#fff',
+              color: '#000',
               fontSize: '14px',
               fontWeight: '500',
               cursor: 'pointer'
@@ -268,7 +268,7 @@ export default function PrivacySettingsModal({
             style={{
               flex: 1,
               padding: '12px',
-              background: '#3b82f6',
+              background: '#000',
               border: 'none',
               borderRadius: '8px',
               color: '#fff',

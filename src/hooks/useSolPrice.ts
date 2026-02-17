@@ -61,17 +61,19 @@ export function useSolPrice() {
 }
 
 export function formatSolWithUsd(sol: number, price: number | null): string {
-  if (price === null) {
-    return `${sol.toFixed(6)} SOL`;
-  }
-  const usd = sol * price;
-  return `${sol.toFixed(6)} SOL ($${usd.toFixed(2)})`;
+  return formatAmountUsdFirst(sol, price, 6);
 }
 
-export function formatSolAmount(sol: number, price: number | null, decimals: number = 6): string {
+// Always show USD first, SOL in parentheses
+export function formatAmountUsdFirst(sol: number, price: number | null, decimals: number = 6): string {
   if (price === null) {
     return `${sol.toFixed(decimals)} SOL`;
   }
   const usd = sol * price;
-  return `${sol.toFixed(decimals)} SOL ($${usd.toFixed(2)})`;
+  return `$${usd.toFixed(2)} (${sol.toFixed(decimals)} SOL)`;
+}
+
+// Backwards-compat alias (keep old name if used elsewhere)
+export function formatSolAmount(sol: number, price: number | null, decimals: number = 6): string {
+  return formatAmountUsdFirst(sol, price, decimals);
 }
