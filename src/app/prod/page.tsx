@@ -79,6 +79,10 @@ export default function ProdPage() {
   const { getSessionHistory } = useSessionRecovery();
   const { price: solPrice } = useSolPrice();
   
+  // Max transaction limit in USD (prod)
+  const MAX_USD = 1000;
+  const maxSolAmount = solPrice ? MAX_USD / solPrice : null;
+  
   // Recovery state
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -197,8 +201,12 @@ export default function ProdPage() {
   
   // Handle selecting a suggested amount
   const handleSelectSuggestion = useCallback((sol: number) => {
-    setAmount(sol.toString());
-  }, []);
+    if (maxSolAmount && sol > maxSolAmount) {
+      setAmount(maxSolAmount.toString());
+    } else {
+      setAmount(sol.toString());
+    }
+  }, [maxSolAmount]);
   
   // Handle recovery
   const handleRecover = useCallback(async () => {
@@ -261,6 +269,7 @@ export default function ProdPage() {
     const amountNum = parseFloat(amount);
     const minAmount = 0.035 * chunks;
     if (amountNum < minAmount) return;
+    if (maxSolAmount && amountNum > maxSolAmount) return;
     
     try {
       let exactChunks: number[] | undefined;
@@ -288,7 +297,8 @@ export default function ProdPage() {
   const amountNum = parseFloat(amount) || 0;
   const minAmount = 0.035 * chunks;
   const meetsMinimum = amountNum >= minAmount;
-  const isFormValid = connected && destination && amount && meetsMinimum && !loading;
+  const underMax = !maxSolAmount || amountNum <= maxSolAmount;
+  const isFormValid = connected && destination && amount && meetsMinimum && underMax && !loading;
   
   return (
     <main style={{ 
@@ -457,8 +467,17 @@ export default function ProdPage() {
             type="number"
             step="0.01"
             min="0.07"
+            max={maxSolAmount ?? undefined}
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              const num = parseFloat(next);
+              if (maxSolAmount && !Number.isNaN(num) && num > maxSolAmount) {
+                setAmount(maxSolAmount.toString());
+              } else {
+                setAmount(next);
+              }
+            }}
             placeholder="Enter amount"
             disabled={loading}
             required
@@ -474,6 +493,9 @@ export default function ProdPage() {
           />
           <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
             Min {formatSolAmount(0.035 * chunks, solPrice, 2)} ({chunks} × {formatSolAmount(0.035, solPrice, 3)} per chunk)
+            {maxSolAmount && (
+              <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)} (USD ${MAX_USD.toFixed(0)})</>
+            )}
           </div>
         </div>
         
