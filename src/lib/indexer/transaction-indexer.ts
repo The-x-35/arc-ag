@@ -403,8 +403,8 @@ export class TransactionIndexer {
       chunks: [],
       totalLamports: 0,
       totalSol: 0,
-      error: `Cannot split ${totalLamports / LAMPORTS_PER_SOL} SOL into ${numChunks} exact historical amounts`,
-      suggestion: `Try sending ${suggestedTotal / LAMPORTS_PER_SOL} SOL instead`,
+      error: `Cannot split ${(totalLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL into ${numChunks} exact historical amounts`,
+      suggestion: suggestedTotal > 0 ? `Try sending ${(suggestedTotal / LAMPORTS_PER_SOL).toFixed(6)} SOL instead` : undefined,
     };
   }
 
@@ -445,7 +445,16 @@ export class TransactionIndexer {
     const chunks: AvailableAmount[] = [];
     const usedAmounts = new Set<number>();
     
+    // Add iteration limit to prevent excessive backtracking
+    let iterationCount = 0;
+    const MAX_ITERATIONS = 10000; // Limit backtracking iterations
+    
     const findCombination = (currentSum: number, depth: number, allowRepeats: boolean = false): boolean => {
+      iterationCount++;
+      if (iterationCount > MAX_ITERATIONS) {
+        return false; // Timeout to prevent hanging
+      }
+      
       if (depth === numChunks) {
         return currentSum === targetLamports;
       }
@@ -460,8 +469,11 @@ export class TransactionIndexer {
       const minForRemaining = MIN_CHUNK_LAMPORTS * remainingChunks;
       const maxForThisChunk = targetLamports - currentSum - minForRemaining + MIN_CHUNK_LAMPORTS;
       
+      // Limit the search space - only try top amounts first
+      const amountsToTry = validAmounts.slice(0, Math.min(15, validAmounts.length));
+      
       // Try each valid amount
-      for (const amt of validAmounts) {
+      for (const amt of amountsToTry) {
         if (amt.lamports < MIN_CHUNK_LAMPORTS || amt.lamports > maxForThisChunk) {
           continue;
         }
@@ -496,6 +508,7 @@ export class TransactionIndexer {
     };
     
     // First try without allowing repeats (better privacy)
+    iterationCount = 0;
     if (findCombination(0, 0, false)) {
       const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
       if (total === targetLamports) {
@@ -511,6 +524,7 @@ export class TransactionIndexer {
     // If that didn't work, try again allowing repeats (for cases like 0.038 + 0.038 = 0.076)
     chunks.length = 0;
     usedAmounts.clear();
+    iterationCount = 0;
     if (findCombination(0, 0, true)) {
       const total = chunks.reduce((sum, c) => sum + c.lamports, 0);
       if (total === targetLamports) {
@@ -578,10 +592,12 @@ export class TransactionIndexer {
     numChunks: number,
     poolIds?: string[]
   ): Promise<{ amount: number; sol: number; chunks: number[] }[]> {
-    const available = await this.getAvailableAmounts(connection, 100, poolIds);
+    // Use smaller limit for suggestions to speed up indexing
+    const available = await this.getAvailableAmounts(connection, 200, poolIds);
     const suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
     
     // Get valid amounts (only use amounts that actually exist in historical data)
+    // Reduced to 30 for faster processing
     const validAmounts = available
       .filter(a => a.lamports >= MIN_CHUNK_LAMPORTS)
       .slice(0, 30);
@@ -593,7 +609,8 @@ export class TransactionIndexer {
     // Generate potential target amounts around the user's target
     const targetAmounts: number[] = [];
     const targetSol = targetLamports / LAMPORTS_PER_SOL;
-    const rangePercent = 0.15; // 15% range (tighter than previous 20%)
+    // Use wider range for larger amounts (like $1000)
+    const rangePercent = targetLamports > 10 * LAMPORTS_PER_SOL ? 0.25 : 0.15; // 25% for amounts > 10 SOL
     
     // Try amounts close to target with smaller increments (1-2% steps)
     // First pass: very close (within 5%) with 1% steps
@@ -636,12 +653,18 @@ export class TransactionIndexer {
       }
     }
     
-    // Also try some common round amounts, but only if they're within 15% of target
-    const roundAmounts = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 1, 2, 3, 5, 10].map(a => Math.floor(a * LAMPORTS_PER_SOL));
+    // Also try some common round amounts, but only if they're within range of target
+    // Include larger round amounts for bigger targets
+    const baseRoundAmounts = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 1, 2, 3, 5, 10];
+    // Add larger round amounts if target is big (e.g., for $1000 ~12 SOL)
+    if (targetLamports > 5 * LAMPORTS_PER_SOL) {
+      baseRoundAmounts.push(8, 10, 12, 15, 20);
+    }
+    const roundAmounts = baseRoundAmounts.map(a => Math.floor(a * LAMPORTS_PER_SOL));
     for (const roundAmt of roundAmounts) {
       if (roundAmt >= MIN_CHUNK_LAMPORTS * numChunks) {
         const diffPercent = Math.abs(roundAmt - targetLamports) / targetLamports;
-        // Only include if within 15% of target
+        // Only include if within range of target
         if (diffPercent <= rangePercent) {
           targetAmounts.push(roundAmt);
         }
@@ -654,7 +677,11 @@ export class TransactionIndexer {
     );
     
     // For each target amount, try to find an exact split with different chunks
-    for (const testTarget of uniqueTargets.slice(0, 30)) {
+    // Try more targets to get more suggestions before deduplication
+    const maxSuggestions = 15; // Increased to get more before deduplication
+    for (const testTarget of uniqueTargets.slice(0, 30)) { // Increased from 20 to 30
+      if (suggestions.length >= maxSuggestions) break;
+      
       const result = this.findExactCombination(validAmounts, testTarget, numChunks);
       
       if (result.valid && result.chunks.length === numChunks) {
@@ -663,6 +690,29 @@ export class TransactionIndexer {
           sol: result.totalSol,
           chunks: result.chunks.map(c => c.sol),
         });
+      }
+    }
+    
+    // If we have fewer than 5 suggestions, generate fallback suggestions using equal splits of valid amounts
+    // This ensures we always have multiple options even if exact matches are limited
+    if (suggestions.length < 5 && validAmounts.length > 0) {
+      // Try using the most common amounts to create equal splits
+      const topAmounts = validAmounts.slice(0, 15); // Increased to 15 for more options
+      for (const amt of topAmounts) {
+        const totalFromChunk = amt.lamports * numChunks;
+        const diffPercent = Math.abs(totalFromChunk - targetLamports) / targetLamports;
+        
+        // More lenient for fallback - allow up to 30% difference for large amounts
+        const maxDiff = targetLamports > 10 * LAMPORTS_PER_SOL ? 0.30 : 0.20; // 30% for amounts > 10 SOL
+        if (diffPercent <= maxDiff && totalFromChunk >= MIN_CHUNK_LAMPORTS * numChunks) {
+          suggestions.push({
+            amount: totalFromChunk,
+            sol: totalFromChunk / LAMPORTS_PER_SOL,
+            chunks: Array(numChunks).fill(amt.sol),
+          });
+        }
+        // Stop if we have enough suggestions
+        if (suggestions.length >= 15) break;
       }
     }
     
@@ -694,16 +744,25 @@ export class TransactionIndexer {
       return 0;
     });
     
-    // Remove duplicates (same total amount)
+    // Remove duplicates (same total amount) - use finer granularity to keep more suggestions
     const unique = new Map<number, typeof suggestions[0]>();
     for (const sug of suggestions) {
-      const rounded = Math.round(sug.amount / 1000000); // Round to nearest 0.001 SOL
+      // Round to nearest 0.0001 SOL (100,000 lamports) instead of 0.001 SOL for finer granularity
+      const rounded = Math.round(sug.amount / 100000);
       if (!unique.has(rounded)) {
         unique.set(rounded, sug);
+      } else {
+        // If we have a duplicate, keep the one closer to target
+        const existing = unique.get(rounded)!;
+        const existingDiff = Math.abs(existing.amount - targetLamports);
+        const newDiff = Math.abs(sug.amount - targetLamports);
+        if (newDiff < existingDiff) {
+          unique.set(rounded, sug);
+        }
       }
     }
     
-    // Return up to 8-10 suggestions to give users better options
+    // Return up to 10 suggestions to give users better options
     return Array.from(unique.values()).slice(0, 10);
   }
 

@@ -227,7 +227,16 @@ export default function ProdPage() {
       // Get suggestions ONLY if split not valid
       let suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
       if (!splitResult.valid) {
-        suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
+        try {
+          suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
+          console.log('Generated suggestions:', suggestions.length, 'for', amountLamports / LAMPORTS_PER_SOL, 'SOL');
+          if (suggestions.length === 0) {
+            console.warn('No suggestions generated for amount:', amountLamports / LAMPORTS_PER_SOL, 'SOL');
+          }
+        } catch (suggestionError) {
+          console.error('Error getting suggestions:', suggestionError);
+          // Continue with empty suggestions - they'll be shown if available
+        }
       }
       
       setSplitPreview(prev => ({
@@ -294,7 +303,7 @@ export default function ProdPage() {
       return count > 1 ? `${formatted} (${count}×)` : formatted;
     }).join(' ');
   }, []);
-
+  
   // Handle selecting a suggested amount
   const handleSelectSuggestion = useCallback((sol: number) => {
     let clampedSol = sol;
@@ -426,7 +435,7 @@ export default function ProdPage() {
       setValidatingInviteCode(false);
     }
   }, [inviteCode, publicKey, isValidCodeFormat]);
-
+  
   // Handle settings save
   const handleSettingsSave = useCallback((newChunks: number, newTimeMinutes: number) => {
     // Calculate slider value from chunks and time
@@ -654,8 +663,8 @@ export default function ProdPage() {
       {/* Main Form - Show only if validated */}
       {inviteCodeValidated && (
         <>
-          {/* Recovery Prompt */}
-          {showRecoveryPrompt && connected && (
+      {/* Recovery Prompt */}
+      {showRecoveryPrompt && connected && (
         <div style={{
           marginBottom: '24px',
           padding: '16px',
@@ -862,12 +871,12 @@ export default function ProdPage() {
 
             {/* Amount input on the right */}
             <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                type="number"
-                step="0.01"
+          <input
+            type="number"
+            step="0.01"
                 min={amountUnit === 'SOL' ? 0.07 : solPrice ? (0.07 * solPrice).toFixed(2) : undefined}
                 max={amountUnit === 'SOL' ? maxSolAmount ?? undefined : maxUsdAmount}
-                value={amount}
+            value={amount}
                 onChange={(e) => {
                   const next = e.target.value;
                   const num = parseFloat(next);
@@ -891,13 +900,13 @@ export default function ProdPage() {
                 }}
                 placeholder={amountUnit === 'SOL' ? 'Enter amount in SOL' : 'Enter amount in USD'}
                 disabled={loading || (amountUnit === 'USD' && !solPrice)}
-                required
-                style={{
-                  width: '100%',
+            required
+            style={{
+              width: '100%',
                   padding: '12px 80px 12px 16px',
                   background: '#fff',
                   border: `1px solid ${splitPreview?.result?.valid ? '#22c55e' : splitPreview?.result?.error ? '#ef4444' : '#ddd'}`,
-                  borderRadius: '8px',
+              borderRadius: '8px',
                   color: '#000',
                   fontSize: '14px',
                   boxSizing: 'border-box'
@@ -970,9 +979,9 @@ export default function ProdPage() {
                 {/* Show grouped split in boxes, similar to previous chunk pills */}
                 <div
                   style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: '6px',
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '6px',
                     marginTop: '8px',
                   }}
                 >
@@ -987,24 +996,24 @@ export default function ProdPage() {
                     return sorted.map(([amount, count], idx) => (
                       <div
                         key={idx}
-                        style={{
-                          padding: '6px 10px',
+                      style={{ 
+                        padding: '6px 10px',
                           background: '#E3F9F3',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontFamily: 'monospace',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontFamily: 'monospace',
                           color: '#00A478',
                           border: '1px solid #00CC65',
                         }}
                       >
                         {amount.toFixed(3)} SOL{count > 1 ? ` (${count}×)` : ''}
-                      </div>
+                    </div>
                     ));
                   })()}
                 </div>
                 <div
                   style={{
-                    fontSize: '11px',
+                  fontSize: '11px', 
                     color: '#666',
                     marginTop: '8px',
                   }}
@@ -1033,23 +1042,42 @@ export default function ProdPage() {
                   <span style={{ color: '#FF2232', fontSize: '13px', fontWeight: '700', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
                     {(() => {
                       const errorText = splitPreview.result.error || '';
-                      // Check if error contains "Cannot split X SOL" and add USD amount
-                      const match = errorText.match(/Cannot split ([\d.]+) SOL/);
+                      
+                      // First, clean up any nested error messages or malformed text
+                      // Remove patterns like "(Cannot split 000.00)" or "(Cannot split X SOL)"
+                      let cleanError = errorText.replace(/\(Cannot split [^)]+\)/g, '').trim();
+                      
+                      // Remove any duplicate "Cannot split" patterns that might have been created
+                      cleanError = cleanError.replace(/Cannot split[^C]*?Cannot split/g, 'Cannot split').trim();
+                      
+                      // Remove any "000.00" or similar zero patterns that might be artifacts
+                      cleanError = cleanError.replace(/\b0{2,}\.0+\b/g, '').trim();
+                      cleanError = cleanError.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+                      
+                      // Find the first valid "Cannot split X SOL" pattern
+                      const match = cleanError.match(/Cannot split ([\d.]+) SOL/);
                       if (match && solPrice && match[1]) {
                         const solAmount = parseFloat(match[1]);
                         if (!isNaN(solAmount) && isFinite(solAmount) && solAmount > 0) {
                           const usdAmount = solAmount * solPrice;
-                          // Replace only the SOL amount part, keeping the rest of the message
-                          return errorText.replace(
-                            /(Cannot split )([\d.]+)( SOL)/,
-                            `$1${solAmount.toFixed(6)}$3 ($${usdAmount.toFixed(2)})`
-                          );
+                          
+                          // Check if USD amount is already in the error (avoid double formatting)
+                          if (!cleanError.includes(`$${usdAmount.toFixed(2)}`)) {
+                            // Replace the first occurrence of "Cannot split X SOL" with formatted version
+                            return cleanError.replace(
+                              /(Cannot split )([\d.]+)( SOL)/,
+                              (match, prefix, solStr, suffix) => {
+                                // Use the parsed amount to ensure correct formatting
+                                return `${prefix}${solAmount.toFixed(6)}${suffix} ($${usdAmount.toFixed(2)})`;
+                              }
+                            );
+                          }
                         }
                       }
-                      return errorText;
+                      return cleanError;
                     })()}
                   </span>
-                </div>
+                  </div>
                 {splitPreview?.suggestions && splitPreview.suggestions.length > 0 && (
                   <div style={{ marginTop: '12px' }}>
                     <div style={{ color: '#666', fontSize: '12px', marginBottom: '8px' }}>
