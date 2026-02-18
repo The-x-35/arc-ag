@@ -4,11 +4,13 @@ import { keccak256, toBytes, hexToBytes } from 'viem';
  * Derive a 32-byte AES-256 key from signedHash
  * Uses keccak256 with a unique label to ensure different keys for different purposes
  */
-function deriveEncryptionKey(signedHash: string): Uint8Array {
+function deriveEncryptionKey(signedHash: string): ArrayBuffer {
   const keyMaterial = keccak256(toBytes(`${signedHash}_destination_encryption_key`));
   const keyBytes = hexToBytes(keyMaterial);
-  // Return first 32 bytes for AES-256
-  return keyBytes.slice(0, 32);
+  // Create a new Uint8Array with a proper ArrayBuffer for AES-256
+  const keyBuffer = new Uint8Array(32);
+  keyBuffer.set(keyBytes.slice(0, 32));
+  return keyBuffer.buffer;
 }
 
 /**
