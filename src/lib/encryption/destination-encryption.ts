@@ -4,11 +4,13 @@ import { keccak256, toBytes, hexToBytes } from 'viem';
  * Derive a 32-byte AES-256 key from signedHash
  * Uses keccak256 with a unique label to ensure different keys for different purposes
  */
-function deriveEncryptionKey(signedHash: string): Uint8Array {
+function deriveEncryptionKey(signedHash: string): ArrayBuffer {
   const keyMaterial = keccak256(toBytes(`${signedHash}_destination_encryption_key`));
   const keyBytes = hexToBytes(keyMaterial);
-  // Return first 32 bytes for AES-256
-  return keyBytes.slice(0, 32);
+  // Return first 32 bytes for AES-256 as ArrayBuffer for crypto.subtle
+  // Create a new ArrayBuffer with just the 32 bytes we need
+  const keyArray = Array.from(keyBytes.slice(0, 32));
+  return new Uint8Array(keyArray).buffer;
 }
 
 /**
@@ -21,7 +23,7 @@ export async function encryptDestination(
   destination: string,
   signedHash: string
 ): Promise<string> {
-  const key = deriveEncryptionKey(signedHash);
+  const keyBuffer = deriveEncryptionKey(signedHash);
   
   // Generate random IV (12 bytes for GCM)
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -29,7 +31,7 @@ export async function encryptDestination(
   // Import key for Web Crypto API
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    key,
+    keyBuffer,
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt']
@@ -66,7 +68,7 @@ export async function decryptDestination(
   encryptedDestination: string,
   signedHash: string
 ): Promise<string> {
-  const key = deriveEncryptionKey(signedHash);
+  const keyBuffer = deriveEncryptionKey(signedHash);
   
   // Decode from base64
   const combined = Uint8Array.from(atob(encryptedDestination), c => c.charCodeAt(0));
@@ -78,7 +80,7 @@ export async function decryptDestination(
   // Import key for Web Crypto API
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    key,
+    keyBuffer,
     { name: 'AES-GCM', length: 256 },
     false,
     ['decrypt']
