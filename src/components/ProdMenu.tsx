@@ -59,7 +59,7 @@ export default function ProdMenu({
         onClick={() => setIsOpen(!isOpen)}
         style={{
           padding: '8px',
-          background: isOpen ? '#000' : 'transparent',
+          background: isOpen ? '#e5e5e5' : 'transparent',
           border: '1px solid #ddd',
           borderRadius: '6px',
           color: '#000',
@@ -71,9 +71,9 @@ export default function ProdMenu({
           height: '36px',
           fontSize: '18px'
         }}
-        title="Menu"
+        title={isOpen ? "Close Menu" : "Menu"}
       >
-        ☰
+        {isOpen ? '✕' : '☰'}
       </button>
 
       {isOpen && (

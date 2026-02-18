@@ -39,9 +39,9 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
 
   const getStatusColor = (status: StepStatus['status']) => {
     switch (status) {
-      case 'completed': return '#22c55e';
-      case 'running': return '#3b82f6';
-      case 'error': return '#ef4444';
+      case 'completed': return '#00CC65';
+      case 'running': return '#3489FF';
+      case 'error': return '#FF2232';
       default: return '#666';
     }
   };
@@ -94,13 +94,14 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
             onClick={handleDetailsClick}
             style={{
               padding: '6px 12px',
-              background: expanded ? '#3b82f6' : '#e5e5e5',
+              background: expanded ? '#3489FF' : '#e5e5e5',
               border: '1px solid #ccc',
               borderRadius: '6px',
               color: expanded ? '#fff' : '#000',
               fontSize: '12px',
               cursor: 'pointer',
-              fontWeight: '500'
+              fontWeight: '500',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
             }}
           >
             {expanded ? 'Hide' : 'Details'}
@@ -120,11 +121,11 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
             width: `${progress}%`,
             height: '100%',
             background: progress === 100 
-              ? '#22c55e' 
+              ? '#00CC65' 
               : steps.some(s => s.status === 'running')
-                ? '#3b82f6'
+                ? '#3489FF'
                 : steps.some(s => s.status === 'error')
-                  ? '#ef4444'
+                  ? '#FF2232'
                   : '#666',
             transition: 'width 0.3s ease, background 0.3s ease',
             borderRadius: '4px'
@@ -196,9 +197,9 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
                     alignItems: 'flex-start',
                     gap: '12px',
                     padding: '10px',
-                    background: status === 'running' ? '#e3f2fd' : 
-                               status === 'completed' ? '#f0fdf4' : 
-                               status === 'error' ? '#fef2f2' : '#f5f5f5',
+                    background: status === 'running' ? '#E3EAF9' : 
+                               status === 'completed' ? '#E3F9F3' : 
+                               status === 'error' ? '#FFC5C6' : '#FEFAF5',
                     borderRadius: '6px',
                     borderLeft: `3px solid ${getStatusColor(status)}`
                   }}

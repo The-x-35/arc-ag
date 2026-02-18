@@ -23,9 +23,6 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
     return `${timeHours} hr ${timeMins} min`;
   };
 
-  // Calculate gradient position (0-100%)
-  const gradientPosition = value;
-
   return (
     <div style={{ width: '100%' }}>
       <div style={{ 
@@ -37,7 +34,8 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
         <label style={{ 
           color: '#000', 
           fontSize: '14px', 
-          fontWeight: '600'
+          fontWeight: '700',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
         }}>
           Privacy Level
         </label>
@@ -47,7 +45,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
           gap: '8px'
         }}>
           <span style={{ 
-            color: '#888', 
+            color: '#666', 
             fontSize: '13px',
             fontFamily: 'monospace'
           }}>
@@ -61,9 +59,9 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
               style={{
                 padding: '6px',
                 background: 'transparent',
-                border: '1px solid #444',
+                border: '1px solid #ddd',
                 borderRadius: '6px',
-                color: '#888',
+                color: '#666',
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -80,17 +78,13 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
         </div>
       </div>
 
-      {/* Slider Container with Gradient Background */}
+      {/* Slider Container with Fixed Red-to-Green Gradient Background */}
       <div style={{ 
         position: 'relative',
         width: '100%',
         height: '8px',
         borderRadius: '4px',
-        background: `linear-gradient(to right, 
-          #ef4444 0%, 
-          #f59e0b ${gradientPosition * 0.5}%, 
-          #22c55e ${gradientPosition}%, 
-          #22c55e 100%)`,
+        background: 'linear-gradient(to right, #FF2232 0%, #f59e0b 20%, #00CC65 60%, #00CC65 100%)',
         marginBottom: '8px'
       }}>
         <input
@@ -119,7 +113,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
           height: '24px',
           borderRadius: '50%',
           background: '#fff',
-          border: '3px solid #3b82f6',
+          border: '3px solid #3489FF',
           boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
           pointerEvents: 'none',
           zIndex: 3,

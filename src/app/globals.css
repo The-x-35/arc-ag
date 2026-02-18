@@ -8,9 +8,36 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   background: #fff;
   color: #000;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography Styles */
+h1, .title-header-1 {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 64px;
+  letter-spacing: -0.02em; /* -2% */
+  line-height: 1.1;
+}
+
+h2, .header-2 {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: -0.02em; /* -2% */
+  line-height: 1.2;
+}
+
+h3, .header-3 {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 36px;
+  letter-spacing: -0.02em; /* -2% */
+  line-height: 1.2;
 }
 
 body {

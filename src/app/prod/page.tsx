@@ -197,6 +197,24 @@ export default function ProdPage() {
       return;
     }
     
+    // Check minimum amount first
+    const minAmount = 0.035 * numChunks;
+    if (amountSol < minAmount) {
+      setSplitPreview(prev => ({
+        ...prev,
+        loading: false,
+        result: {
+          valid: false,
+          chunks: [],
+          totalLamports: 0,
+          totalSol: 0,
+          error: `Amount is below minimum. Minimum is ${formatSolAmount(minAmount, solPrice, 3)} (${numChunks} parts × 0.035 SOL per part)`,
+        },
+        suggestions: [],
+      }));
+      return;
+    }
+    
     setSplitPreview(prev => ({ ...prev, loading: true }));
     
     try {
@@ -233,7 +251,7 @@ export default function ProdPage() {
         suggestions: [],
       }));
     }
-  }, [selectedPools]);
+  }, [selectedPools, solPrice]);
   
   // Debounced amount change handler
   useEffect(() => {
@@ -503,7 +521,7 @@ export default function ProdPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
             <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
-            <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
           </div>
           <p style={{ color: '#666', fontSize: '16px', textAlign: 'center', marginBottom: '16px' }}>
             Connect your Solana wallet to continue
@@ -532,7 +550,7 @@ export default function ProdPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
             <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
-            <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
           </div>
           <div style={{
             background: '#f5f5f5',
@@ -541,7 +559,7 @@ export default function ProdPage() {
             padding: '32px',
             width: '100%'
           }}>
-            <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#000', marginBottom: '8px', textAlign: 'center' }}>
+            <h2 style={{ fontSize: '40px', fontWeight: '700', color: '#000', marginBottom: '8px', textAlign: 'center', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
               Enter Invite Code
             </h2>
             <p style={{ color: '#666', fontSize: '14px', textAlign: 'center', marginBottom: '24px' }}>
@@ -705,7 +723,7 @@ export default function ProdPage() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <img src="/image.png" alt="VPM Logo" style={{ height: '32px', width: 'auto' }} />
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#000' }}>VPM</h1>
+          <h1 style={{ fontSize: '40px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <ProdMenu
@@ -934,9 +952,9 @@ export default function ProdPage() {
             ) : splitPreview?.result?.valid ? (
               <div style={{ 
                 padding: '12px',
-                background: '#f0fdf4',
+                background: '#E3F9F3',
                 borderRadius: '8px',
-                border: '1px solid #22c55e'
+                border: '1px solid #00CC65'
               }}>
                 <div style={{ 
                   display: 'flex', 
@@ -944,8 +962,8 @@ export default function ProdPage() {
                   gap: '8px',
                   marginBottom: '8px'
                 }}>
-                  <span style={{ color: '#22c55e', fontSize: '16px' }}>✓</span>
-                  <span style={{ color: '#22c55e', fontSize: '13px', fontWeight: '600' }}>
+                  <span style={{ color: '#00CC65', fontSize: '16px' }}>✓</span>
+                  <span style={{ color: '#00CC65', fontSize: '13px', fontWeight: '700', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
                     Valid split found!
                   </span>
                 </div>
@@ -971,12 +989,12 @@ export default function ProdPage() {
                         key={idx}
                         style={{
                           padding: '6px 10px',
-                          background: '#dcfce7',
+                          background: '#E3F9F3',
                           borderRadius: '4px',
                           fontSize: '12px',
                           fontFamily: 'monospace',
-                          color: '#166534',
-                          border: '1px solid #22c55e',
+                          color: '#00A478',
+                          border: '1px solid #00CC65',
                         }}
                       >
                         {amount.toFixed(3)} SOL{count > 1 ? ` (${count}×)` : ''}
@@ -999,9 +1017,9 @@ export default function ProdPage() {
             ) : splitPreview?.result?.error ? (
               <div style={{ 
                 padding: '12px',
-                background: '#fef2f2',
+                background: '#FFC5C6',
                 borderRadius: '8px',
-                border: '1px solid #ef4444'
+                border: '1px solid #FF2232'
               }}>
                 <div style={{ 
                   display: 'flex', 
@@ -1009,11 +1027,27 @@ export default function ProdPage() {
                   gap: '8px',
                   marginBottom: '8px'
                 }}>
-                  <span style={{ color: '#ef4444', fontSize: '16px' }}>
+                  <span style={{ color: '#FF2232', fontSize: '16px' }}>
                     ✗
                   </span>
-                  <span style={{ color: '#ef4444', fontSize: '13px' }}>
-                    This amount is not secure to send based on historical transactions.
+                  <span style={{ color: '#FF2232', fontSize: '13px', fontWeight: '700', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
+                    {(() => {
+                      const errorText = splitPreview.result.error || '';
+                      // Check if error contains "Cannot split X SOL" and add USD amount
+                      const match = errorText.match(/Cannot split ([\d.]+) SOL/);
+                      if (match && solPrice && match[1]) {
+                        const solAmount = parseFloat(match[1]);
+                        if (!isNaN(solAmount) && isFinite(solAmount) && solAmount > 0) {
+                          const usdAmount = solAmount * solPrice;
+                          // Replace only the SOL amount part, keeping the rest of the message
+                          return errorText.replace(
+                            /(Cannot split )([\d.]+)( SOL)/,
+                            `$1${solAmount.toFixed(6)}$3 ($${usdAmount.toFixed(2)})`
+                          );
+                        }
+                      }
+                      return errorText;
+                    })()}
                   </span>
                 </div>
                 {splitPreview?.suggestions && splitPreview.suggestions.length > 0 && (
@@ -1087,11 +1121,13 @@ export default function ProdPage() {
           <div style={{
             marginBottom: '20px',
             padding: '12px',
-            background: '#fff',
-            border: '1px solid #ef4444',
+            background: '#FFC5C6',
+            border: '1px solid #FF2232',
             borderRadius: '8px',
-            color: '#dc2626',
-            fontSize: '13px'
+            color: '#FF2232',
+            fontSize: '13px',
+            fontWeight: '700',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
           }}>
             {error}
           </div>
@@ -1102,11 +1138,13 @@ export default function ProdPage() {
           <div style={{
             marginBottom: '20px',
             padding: '12px',
-            background: '#fff',
-            border: '1px solid #22c55e',
+            background: '#E3F9F3',
+            border: '1px solid #00CC65',
             borderRadius: '8px',
-            color: '#16a34a',
-            fontSize: '13px'
+            color: '#00A478',
+            fontSize: '13px',
+            fontWeight: '700',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
           }}>
             <div style={{ marginBottom: '8px' }}>
               ✓ Complete! Sent {formatSolAmount(result.totalAmount, solPrice, 6)} to {result.recipient.slice(0,8)}...{result.recipient.slice(-8)}
@@ -1125,7 +1163,8 @@ export default function ProdPage() {
                 border: 'none',
                 borderRadius: '6px',
                 color: '#fff',
-                fontWeight: '600',
+                fontWeight: '700',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
                 cursor: 'pointer',
                 fontSize: '13px'
               }}
@@ -1148,7 +1187,8 @@ export default function ProdPage() {
             border: 'none',
             borderRadius: '8px',
             fontSize: '16px',
-            fontWeight: '600',
+            fontWeight: '700',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
             cursor: isFormValid ? 'pointer' : 'not-allowed',
             opacity: isFormValid ? 1 : 0.6
           }}
