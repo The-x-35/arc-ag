@@ -258,6 +258,25 @@ export default function ProdPage() {
     }
   }, [amount, amountUnit, solPrice, chunks, computeSplitPreview]);
   
+  // Helper function to format chunk breakdown (e.g., "1 SOL (3×) 2 SOL")
+  const formatChunkBreakdown = useCallback((chunks: number[]): string => {
+    // Group chunks by amount and count occurrences
+    const grouped = new Map<number, number>();
+    for (const chunk of chunks) {
+      const rounded = Math.round(chunk * 1000) / 1000; // Round to 0.001 SOL for grouping
+      grouped.set(rounded, (grouped.get(rounded) || 0) + 1);
+    }
+    
+    // Sort by amount (ascending) for consistent display
+    const sorted = Array.from(grouped.entries()).sort((a, b) => a[0] - b[0]);
+    
+    // Format as "amount SOL (count×) amount SOL (count×)" etc.
+    return sorted.map(([amount, count]) => {
+      const formatted = `${amount.toFixed(3)} SOL`;
+      return count > 1 ? `${formatted} (${count}×)` : formatted;
+    }).join(' ');
+  }, []);
+
   // Handle selecting a suggested amount
   const handleSelectSuggestion = useCallback((sol: number) => {
     let clampedSol = sol;
@@ -892,7 +911,7 @@ export default function ProdPage() {
           <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
             Min {formatSolAmount(0.035 * chunks, solPrice, 2)}
             {maxSolAmount && (
-              <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)} (USD ${MAX_USD.toFixed(0)})</>
+              <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)}</>
             )}
           </div>
         </div>
@@ -930,40 +949,51 @@ export default function ProdPage() {
                     Valid split found!
                   </span>
                 </div>
-                <div style={{ 
-                  display: 'flex', 
-                  flexWrap: 'wrap', 
-                  gap: '6px',
-                  marginTop: '8px'
-                }}>
-                  {splitPreview.result.chunks.map((chunk, i) => (
-                    <div 
-                      key={i}
-                      style={{ 
-                        padding: '6px 10px',
-                        background: '#dcfce7',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontFamily: 'monospace',
-                        color: '#166534',
-                        border: '1px solid #22c55e'
-                      }}
-                    >
-                      {formatSolAmount(chunk.sol, solPrice, 6)}
-                      {chunk.isHistorical && chunk.frequency && (
-                        <span style={{ marginLeft: '4px', fontSize: '10px', color: '#666' }}>
-                          ({chunk.frequency}×)
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                {/* Show grouped split in boxes, similar to previous chunk pills */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    marginTop: '8px',
+                  }}
+                >
+                  {(() => {
+                    const chunksSol = splitPreview.result.chunks.map((c) => c.sol);
+                    const grouped = new Map<number, number>();
+                    for (const chunk of chunksSol) {
+                      const rounded = Math.round(chunk * 1000) / 1000; // 0.001 SOL grouping
+                      grouped.set(rounded, (grouped.get(rounded) || 0) + 1);
+                    }
+                    const sorted = Array.from(grouped.entries()).sort((a, b) => a[0] - b[0]);
+                    return sorted.map(([amount, count], idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '6px 10px',
+                          background: '#dcfce7',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          color: '#166534',
+                          border: '1px solid #22c55e',
+                        }}
+                      >
+                        {amount.toFixed(3)} SOL{count > 1 ? ` (${count}×)` : ''}
+                      </div>
+                    ));
+                  })()}
                 </div>
-                <div style={{ 
-                  fontSize: '11px', 
-                  color: '#666',
-                  marginTop: '8px'
-                }}>
-                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} • Each part matches historical transactions
+                <div
+                  style={{
+                    fontSize: '11px',
+                    color: '#666',
+                    marginTop: '8px',
+                  }}
+                >
+                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 3)} • Split:{' '}
+                  {formatChunkBreakdown(splitPreview.result.chunks.map((c) => c.sol))} • Each part
+                  matches historical transactions
                 </div>
               </div>
             ) : splitPreview?.result?.error ? (
@@ -1006,12 +1036,25 @@ export default function ProdPage() {
                             cursor: loading ? 'not-allowed' : 'pointer',
                             color: '#000',
                             fontSize: '12px',
-                            opacity: loading ? 0.6 : 1
+                            opacity: loading ? 0.6 : 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: '4px'
                           }}
                         >
                           <div style={{ fontWeight: '600' }}>
-                            {formatSolAmount(suggestion.sol, solPrice, 6)}
+                            {formatSolAmount(suggestion.sol, solPrice, 3)}
                           </div>
+                          {suggestion.chunks && suggestion.chunks.length > 0 && (
+                            <div style={{ 
+                              fontSize: '10px', 
+                              color: '#666',
+                              fontFamily: 'monospace'
+                            }}>
+                              {formatChunkBreakdown(suggestion.chunks)}
+                            </div>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -1019,46 +1062,6 @@ export default function ProdPage() {
                 )}
               </div>
             ) : null}
-          </div>
-        )}
-        
-        {/* Recommended Amounts */}
-        {splitPreview?.availableAmounts && splitPreview.availableAmounts.length > 0 && (
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: '#666', display: 'block', marginBottom: '8px', fontSize: '12px' }}>
-              Recommended amounts (from historical transactions):
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {splitPreview.availableAmounts
-                .filter(a => a.frequency > 0)
-                .slice(0, 8)
-                .map((amt, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => handleSelectSuggestion(amt.sol * chunks)}
-                    disabled={loading}
-                    style={{
-                      padding: '6px 10px',
-                      background: amt.isHistorical ? '#e5e5e5' : '#f5f5f5',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: loading ? 'not-allowed' : 'pointer',
-                      color: '#000',
-                      fontSize: '11px',
-                      opacity: loading ? 0.6 : 1
-                    }}
-                  >
-                    {formatSolAmount(amt.sol, solPrice, 3)}
-                    <span style={{ color: '#999', marginLeft: '4px' }}>
-                      ({amt.frequency}×)
-                    </span>
-                  </button>
-                ))}
-            </div>
-            <div style={{ fontSize: '10px', color: '#999', marginTop: '6px' }}>
-              Click to set as part size (total = part × {chunks} parts)
-            </div>
           </div>
         )}
         
@@ -1084,10 +1087,10 @@ export default function ProdPage() {
           <div style={{
             marginBottom: '20px',
             padding: '12px',
-            background: '#1a0000',
-            border: '1px solid #500',
+            background: '#fff',
+            border: '1px solid #ef4444',
             borderRadius: '8px',
-            color: '#f55',
+            color: '#dc2626',
             fontSize: '13px'
           }}>
             {error}
@@ -1099,10 +1102,10 @@ export default function ProdPage() {
           <div style={{
             marginBottom: '20px',
             padding: '12px',
-            background: '#001a00',
-            border: '1px solid #050',
+            background: '#fff',
+            border: '1px solid #22c55e',
             borderRadius: '8px',
-            color: '#5f5',
+            color: '#16a34a',
             fontSize: '13px'
           }}>
             <div style={{ marginBottom: '8px' }}>

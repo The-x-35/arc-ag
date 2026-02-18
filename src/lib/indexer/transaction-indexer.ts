@@ -569,6 +569,7 @@ export class TransactionIndexer {
    * Get suggested amounts based on user's target
    * Returns list of valid totals with DIFFERENT chunk amounts for better privacy
    * Each suggestion is verified to have a valid exact split
+   * Prioritizes suggestions close to the user's entered amount
    * @param poolIds Optional: filter to only these pool IDs
    */
   async getSuggestedAmounts(
@@ -591,38 +592,72 @@ export class TransactionIndexer {
     
     // Generate potential target amounts around the user's target
     const targetAmounts: number[] = [];
+    const targetSol = targetLamports / LAMPORTS_PER_SOL;
+    const rangePercent = 0.15; // 15% range (tighter than previous 20%)
     
-    // Try amounts close to target (within 20% above/below)
-    for (let offset = -0.2; offset <= 0.2; offset += 0.05) {
+    // Try amounts close to target with smaller increments (1-2% steps)
+    // First pass: very close (within 5%) with 1% steps
+    for (let offset = -0.05; offset <= 0.05; offset += 0.01) {
       const testAmount = Math.floor(targetLamports * (1 + offset));
       if (testAmount >= MIN_CHUNK_LAMPORTS * numChunks) {
         targetAmounts.push(testAmount);
       }
     }
     
-    // Also try some common round amounts
-    const roundAmounts = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5].map(a => Math.floor(a * LAMPORTS_PER_SOL));
-    for (const roundAmt of roundAmounts) {
-      if (roundAmt >= MIN_CHUNK_LAMPORTS * numChunks && roundAmt <= targetLamports * 2) {
-        targetAmounts.push(roundAmt);
+    // Second pass: medium range (5-10%) with 1.5% steps
+    for (let offset = -0.10; offset <= 0.10; offset += 0.015) {
+      if (Math.abs(offset) > 0.05) { // Skip already covered range
+        const testAmount = Math.floor(targetLamports * (1 + offset));
+        if (testAmount >= MIN_CHUNK_LAMPORTS * numChunks) {
+          targetAmounts.push(testAmount);
+        }
       }
     }
     
-    // Remove duplicates and sort
+    // Third pass: outer range (10-15%) with 2% steps
+    for (let offset = -rangePercent; offset <= rangePercent; offset += 0.02) {
+      if (Math.abs(offset) > 0.10) { // Skip already covered range
+        const testAmount = Math.floor(targetLamports * (1 + offset));
+        if (testAmount >= MIN_CHUNK_LAMPORTS * numChunks) {
+          targetAmounts.push(testAmount);
+        }
+      }
+    }
+    
+    // Consider available amounts that when multiplied by numChunks are close to target
+    // This helps find suggestions that are naturally close to what the user wants
+    for (const amt of validAmounts.slice(0, 20)) {
+      const totalFromChunk = amt.lamports * numChunks;
+      const diffPercent = Math.abs(totalFromChunk - targetLamports) / targetLamports;
+      
+      // Only consider if within 15% of target
+      if (diffPercent <= rangePercent && totalFromChunk >= MIN_CHUNK_LAMPORTS * numChunks) {
+        targetAmounts.push(totalFromChunk);
+      }
+    }
+    
+    // Also try some common round amounts, but only if they're within 15% of target
+    const roundAmounts = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 1, 2, 3, 5, 10].map(a => Math.floor(a * LAMPORTS_PER_SOL));
+    for (const roundAmt of roundAmounts) {
+      if (roundAmt >= MIN_CHUNK_LAMPORTS * numChunks) {
+        const diffPercent = Math.abs(roundAmt - targetLamports) / targetLamports;
+        // Only include if within 15% of target
+        if (diffPercent <= rangePercent) {
+          targetAmounts.push(roundAmt);
+        }
+      }
+    }
+    
+    // Remove duplicates and sort by proximity to target
     const uniqueTargets = Array.from(new Set(targetAmounts)).sort((a, b) => 
       Math.abs(a - targetLamports) - Math.abs(b - targetLamports)
     );
     
     // For each target amount, try to find an exact split with different chunks
-    for (const testTarget of uniqueTargets.slice(0, 20)) {
+    for (const testTarget of uniqueTargets.slice(0, 30)) {
       const result = this.findExactCombination(validAmounts, testTarget, numChunks);
       
       if (result.valid && result.chunks.length === numChunks) {
-        // Check if chunks are different (better privacy)
-        const uniqueChunks = new Set(result.chunks.map(c => c.lamports));
-        const hasVariation = uniqueChunks.size > 1;
-        
-        // Prefer suggestions with variation, but include equal splits too
         suggestions.push({
           amount: result.totalLamports,
           sol: result.totalSol,
@@ -631,21 +666,32 @@ export class TransactionIndexer {
       }
     }
     
-    // Sort by closeness to target, prioritizing amounts >= target and more variation
+    // Sort primarily by absolute difference from target (closest first)
+    // Secondary sort by variation in chunks (for privacy)
     suggestions.sort((a, b) => {
-      const aAboveTarget = a.amount >= targetLamports;
-      const bAboveTarget = b.amount >= targetLamports;
+      // Primary: absolute difference from target (closest first)
+      const aDiff = Math.abs(a.amount - targetLamports);
+      const bDiff = Math.abs(b.amount - targetLamports);
       
-      if (aAboveTarget && !bAboveTarget) return -1;
-      if (!aAboveTarget && bAboveTarget) return 1;
+      if (aDiff !== bDiff) {
+        return aDiff - bDiff;
+      }
       
-      // Prefer suggestions with more variation (different chunks)
+      // Secondary: prefer suggestions with more variation (different chunks)
       const aVariation = new Set(a.chunks.map(c => Math.round(c * 1000))).size;
       const bVariation = new Set(b.chunks.map(c => Math.round(c * 1000))).size;
-      if (aVariation !== bVariation) return bVariation - aVariation;
+      if (aVariation !== bVariation) {
+        return bVariation - aVariation;
+      }
       
-      // Then sort by closeness to target
-      return Math.abs(a.amount - targetLamports) - Math.abs(b.amount - targetLamports);
+      // Tertiary: prefer amounts >= target
+      const aAboveTarget = a.amount >= targetLamports;
+      const bAboveTarget = b.amount >= targetLamports;
+      if (aAboveTarget !== bAboveTarget) {
+        return aAboveTarget ? -1 : 1;
+      }
+      
+      return 0;
     });
     
     // Remove duplicates (same total amount)
@@ -657,7 +703,8 @@ export class TransactionIndexer {
       }
     }
     
-    return Array.from(unique.values()).slice(0, 6);
+    // Return up to 8-10 suggestions to give users better options
+    return Array.from(unique.values()).slice(0, 10);
   }
 
   /**

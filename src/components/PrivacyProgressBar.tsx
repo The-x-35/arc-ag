@@ -66,8 +66,8 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
     <div style={{ width: '100%' }}>
       {/* Compact Progress Bar */}
       <div style={{
-        background: '#111',
-        border: '1px solid #333',
+        background: '#fff',
+        border: '1px solid #ddd',
         borderRadius: '8px',
         padding: '16px',
         marginBottom: expanded ? '12px' : '0'
@@ -82,22 +82,22 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
             <div style={{
               fontSize: '18px',
               fontWeight: '600',
-              color: '#fff',
+              color: '#000',
               fontFamily: 'monospace'
             }}>
               {completedCount}/{totalSteps}
             </div>
-            <span style={{ color: '#888', fontSize: '13px' }}>done</span>
+            <span style={{ color: '#666', fontSize: '13px' }}>done</span>
           </div>
           <button
             type="button"
             onClick={handleDetailsClick}
             style={{
               padding: '6px 12px',
-              background: expanded ? '#3b82f6' : '#222',
-              border: '1px solid #444',
+              background: expanded ? '#3b82f6' : '#e5e5e5',
+              border: '1px solid #ccc',
               borderRadius: '6px',
-              color: '#fff',
+              color: expanded ? '#fff' : '#000',
               fontSize: '12px',
               cursor: 'pointer',
               fontWeight: '500'
@@ -111,7 +111,7 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
         <div style={{
           width: '100%',
           height: '8px',
-          background: '#0a0a0a',
+          background: '#e5e5e5',
           borderRadius: '4px',
           overflow: 'hidden',
           position: 'relative'
@@ -136,7 +136,7 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
           <div style={{
             marginTop: '12px',
             fontSize: '12px',
-            color: '#888'
+            color: '#666'
           }}>
             {(() => {
               const currentStep = steps.find(s => s.status === 'running') || 
@@ -166,8 +166,8 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
       {/* Expanded Details View */}
       {expanded && (
         <div style={{
-          background: '#111',
-          border: '1px solid #333',
+          background: '#fff',
+          border: '1px solid #ddd',
           borderRadius: '8px',
           padding: '16px',
           maxHeight: '400px',
@@ -176,7 +176,7 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
           <div style={{
             fontSize: '14px',
             fontWeight: '600',
-            color: '#fff',
+            color: '#000',
             marginBottom: '12px'
           }}>
             Transaction Steps
@@ -196,9 +196,9 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
                     alignItems: 'flex-start',
                     gap: '12px',
                     padding: '10px',
-                    background: status === 'running' ? '#0a1020' : 
-                               status === 'completed' ? '#0a1f0a' : 
-                               status === 'error' ? '#1a0000' : '#0a0a0a',
+                    background: status === 'running' ? '#e3f2fd' : 
+                               status === 'completed' ? '#f0fdf4' : 
+                               status === 'error' ? '#fef2f2' : '#f5f5f5',
                     borderRadius: '6px',
                     borderLeft: `3px solid ${getStatusColor(status)}`
                   }}
@@ -220,7 +220,7 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
-                      color: status === 'pending' ? '#666' : '#fff',
+                      color: status === 'pending' ? '#666' : '#000',
                       fontSize: '13px',
                       fontWeight: status === 'running' ? '600' : '400'
                     }}>
@@ -228,7 +228,7 @@ export default function PrivacyProgressBar({ steps, onDetailsClick }: PrivacyPro
                     </div>
                     {message && (
                       <div style={{
-                        color: '#888',
+                        color: '#666',
                         fontSize: '11px',
                         marginTop: '4px'
                       }}>
