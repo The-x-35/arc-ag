@@ -183,7 +183,8 @@ export default function Home() {
     
     setLoadingHistory(true);
     try {
-      const sessions = await getSessionHistory(publicKey.toBase58(), { limit: 50 });
+      // Fetch all sessions (no limit to get all, ordered by most recent first)
+      const sessions = await getSessionHistory(publicKey.toBase58());
       setSessionHistory(sessions);
     } catch (err: any) {
       console.error('Failed to load session history:', err);

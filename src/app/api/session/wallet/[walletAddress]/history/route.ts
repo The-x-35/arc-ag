@@ -8,15 +8,20 @@ export async function GET(
   try {
     const { walletAddress } = params;
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? parseInt(limitParam) : undefined; // No limit by default
     const status = searchParams.get('status'); // Optional filter by status
 
     let query = supabase
       .from('transaction_sessions')
       .select('*')
       .eq('wallet_address', walletAddress)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('created_at', { ascending: false }); // Most recent first
+    
+    // Only apply limit if specified
+    if (limit !== undefined && limit > 0) {
+      query = query.limit(limit);
+    }
 
     // Filter by status if provided
     if (status) {

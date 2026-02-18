@@ -34,7 +34,8 @@ export default function ProdMenu({
     if (!publicKey) return;
     setLoadingSessions(true);
     try {
-      const sessionList = await getSessionHistory(publicKey.toBase58(), { limit: 20 });
+      // Fetch all sessions (no limit to get all)
+      const sessionList = await getSessionHistory(publicKey.toBase58());
       setSessions(sessionList);
     } catch (err) {
       console.error('Failed to load sessions:', err);

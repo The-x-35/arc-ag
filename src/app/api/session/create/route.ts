@@ -1,20 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/db/supabase';
 
-/**
- * Generate a random word for session
- */
-function generateRandomWord(): string {
-  const words = [
-    'apple', 'banana', 'cherry', 'dragon', 'elephant', 'forest', 'galaxy', 'harmony',
-    'island', 'jungle', 'knight', 'lighthouse', 'mountain', 'nebula', 'ocean', 'planet',
-    'quantum', 'rainbow', 'sunset', 'thunder', 'universe', 'volcano', 'waterfall', 'xylophone',
-    'yesterday', 'zenith', 'alpha', 'beta', 'gamma', 'delta'
-  ];
-  const randomIndex = Math.floor(Math.random() * words.length);
-  return words[randomIndex];
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -34,15 +20,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate random word
-    const sessionWord = generateRandomWord();
-
-    // Create session in database
+    // Create session in database (session_word will be set to session ID after creation)
     const { data, error } = await supabase
       .from('transaction_sessions')
       .insert({
         wallet_address: walletAddress,
-        session_word: sessionWord,
+        session_word: '', // Temporary, will update with session ID
         current_step: 1,
         status: 'pending',
         transaction_params: transactionParams,
@@ -60,10 +43,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Update session_word to be the session ID
+    const { error: updateError } = await supabase
+      .from('transaction_sessions')
+      .update({ session_word: data.id })
+      .eq('id', data.id);
+
+    if (updateError) {
+      console.error('Error updating session word:', updateError);
+      // Continue anyway, session was created
+    }
+
     return NextResponse.json({
       success: true,
       sessionId: data.id,
-      word: sessionWord,
+      word: data.id, // Session ID is the word
     });
   } catch (error: any) {
     console.error('Error in create session endpoint:', error);
