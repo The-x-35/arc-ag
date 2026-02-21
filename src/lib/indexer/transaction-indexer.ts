@@ -190,25 +190,24 @@ export class TransactionIndexer {
               const accountKeys = tx.transaction.message.accountKeys;
               let feePayerAddress = '';
               
-              // Try to get fee payer from transaction.feePayer first (if available)
-              if (tx.transaction.message.feePayer) {
-                feePayerAddress = tx.transaction.message.feePayer.toBase58();
-              } else {
-                // Fallback: first account is always the fee payer
-                const feePayerIndex = 0;
-                if (feePayerIndex < accountKeys.length) {
-                  const feePayerKey = accountKeys[feePayerIndex];
-                  
-                  // Handle different account key formats
-                  if (typeof feePayerKey === 'string') {
-                    feePayerAddress = feePayerKey;
-                  } else if (feePayerKey && (feePayerKey as any).pubkey) {
-                    // Account key is an object with pubkey property
-                    feePayerAddress = (feePayerKey as any).pubkey.toBase58();
-                  } else if (feePayerKey && typeof (feePayerKey as any).toBase58 === 'function') {
-                    // Account key is a PublicKey object
-                    feePayerAddress = (feePayerKey as PublicKey).toBase58();
-                  }
+              // First account is always the fee payer
+              const feePayerIndex = 0;
+              if (feePayerIndex < accountKeys.length) {
+                const feePayerKey = accountKeys[feePayerIndex];
+                
+                // Handle different account key formats
+                if (typeof feePayerKey === 'string') {
+                  feePayerAddress = feePayerKey;
+                } else if (feePayerKey && (feePayerKey as any).pubkey) {
+                  // Account key is an object with pubkey property
+                  feePayerAddress = (feePayerKey as any).pubkey.toBase58();
+                } else if (feePayerKey && typeof (feePayerKey as any).toBase58 === 'function') {
+                  // Account key is a PublicKey object
+                  feePayerAddress = (feePayerKey as any).toBase58();
+                } else if (feePayerKey && (feePayerKey as any).address) {
+                  // Account key might have an address property
+                  const addr = (feePayerKey as any).address;
+                  feePayerAddress = typeof addr === 'string' ? addr : addr.toBase58();
                 }
               }
               
@@ -233,10 +232,13 @@ export class TransactionIndexer {
                     
                     if (typeof accountKey === 'string') {
                       accountAddr = accountKey;
-                    } else if (accountKey && typeof accountKey.toBase58 === 'function') {
-                      accountAddr = accountKey.toBase58();
-                    } else if (accountKey && accountKey.pubkey) {
-                      accountAddr = accountKey.pubkey.toBase58();
+                    } else if (accountKey && typeof (accountKey as any).toBase58 === 'function') {
+                      accountAddr = (accountKey as any).toBase58();
+                    } else if (accountKey && (accountKey as any).pubkey) {
+                      accountAddr = (accountKey as any).pubkey.toBase58();
+                    } else if (accountKey && (accountKey as any).address) {
+                      const addr = (accountKey as any).address;
+                      accountAddr = typeof addr === 'string' ? addr : addr.toBase58();
                     }
                     
                     // Don't count the fee payer or tree account - these are not withdrawal recipients
