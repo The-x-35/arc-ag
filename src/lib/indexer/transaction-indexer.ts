@@ -1,4 +1,4 @@
-import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { poolRegistry } from '../pools/registry';
 
 /**
@@ -19,6 +19,10 @@ export interface IndexedData {
   totalTransactions: number;
   lastUpdated: Date;
   poolBreakdown: Map<string, number>; // poolId -> count
+  depositAmounts: HistoricalAmount[]; // Deposits (transfers TO pools)
+  withdrawalAmounts: HistoricalAmount[]; // Withdrawals (transfers FROM pools)
+  depositBreakdown: Map<string, number>; // poolId -> deposit count
+  withdrawalBreakdown: Map<string, number>; // poolId -> withdrawal count
 }
 
 /**
@@ -93,7 +97,11 @@ export class TransactionIndexer {
     poolIds?: string[]
   ): Promise<IndexedData> {
     const allAmounts: HistoricalAmount[] = [];
+    const depositAmounts: HistoricalAmount[] = [];
+    const withdrawalAmounts: HistoricalAmount[] = [];
     const poolBreakdown = new Map<string, number>();
+    const depositBreakdown = new Map<string, number>();
+    const withdrawalBreakdown = new Map<string, number>();
     let totalTransactions = 0;
     
     const allPools = poolRegistry.getAll();
@@ -120,29 +128,199 @@ export class TransactionIndexer {
         }
       }
       
-      // Track pool breakdown
+      // Track pool breakdown (deposits)
       poolBreakdown.set(pool.id, amounts.length);
+      depositBreakdown.set(pool.id, amounts.length);
       totalTransactions += amounts.length;
       
-      // Count frequency of each amount
-      const frequencyMap = new Map<number, number>();
+      // Count frequency of each deposit amount
+      const depositFrequencyMap = new Map<number, number>();
       for (const amount of amounts) {
-        frequencyMap.set(amount, (frequencyMap.get(amount) || 0) + 1);
+        depositFrequencyMap.set(amount, (depositFrequencyMap.get(amount) || 0) + 1);
       }
       
-      // Add to all amounts with frequency
-      for (const [amount, frequency] of frequencyMap) {
-        allAmounts.push({
+      // Add deposits to depositAmounts and allAmounts
+      for (const [amount, frequency] of depositFrequencyMap) {
+        const histAmount: HistoricalAmount = {
+          amount,
+          amountSol: amount / LAMPORTS_PER_SOL,
+          poolId: pool.id,
+          frequency,
+        };
+        depositAmounts.push(histAmount);
+        allAmounts.push(histAmount);
+      }
+      
+      // Try to get withdrawals (transfers FROM pool addresses)
+      // Use fee payer address as indicator: AF8VuwCncKd5ZBnLYYnMjqh4vLch8mjqE75sFe5ZjRFW
+      const WITHDRAWAL_FEE_PAYER = 'AF8VuwCncKd5ZBnLYYnMjqh4vLch8mjqE75sFe5ZjRFW';
+      let poolWithdrawalAmounts: number[] = [];
+      try {
+        // For Privacy Cash, check transactions involving the tree token account
+        // Withdrawals are indicated by the fee payer being the withdrawal address
+        if (pool.id === 'privacy-cash') {
+          const PRIVACY_CASH_PROGRAM_ID = new PublicKey('9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD');
+          const [treeTokenAccount] = PublicKey.findProgramAddressSync(
+            [Buffer.from('tree_token')],
+            PRIVACY_CASH_PROGRAM_ID
+          );
+          const treeAddress = treeTokenAccount.toBase58();
+          
+          // Get signatures for transactions involving the tree account
+          const signatures = await connection.getSignaturesForAddress(
+            treeTokenAccount,
+            { limit }
+          );
+          
+          console.log(`[Withdrawal Tracking] Checking ${signatures.length} transactions for withdrawals...`);
+          
+          let withdrawalTxCount = 0;
+          const batchSize = 10;
+          for (let i = 0; i < signatures.length; i += batchSize) {
+            const batch = signatures.slice(i, i + batchSize);
+            const txs = await connection.getParsedTransactions(
+              batch.map(s => s.signature),
+              { maxSupportedTransactionVersion: 0 }
+            );
+            
+            for (const tx of txs) {
+              if (!tx || !tx.transaction || !tx.meta) continue;
+              
+              // Check if fee payer is the withdrawal indicator address
+              const accountKeys = tx.transaction.message.accountKeys;
+              let feePayerAddress = '';
+              
+              // Try to get fee payer from transaction.feePayer first (if available)
+              if (tx.transaction.message.feePayer) {
+                feePayerAddress = tx.transaction.message.feePayer.toBase58();
+              } else {
+                // Fallback: first account is always the fee payer
+                const feePayerIndex = 0;
+                if (feePayerIndex < accountKeys.length) {
+                  const feePayerKey = accountKeys[feePayerIndex];
+                  
+                  // Handle different account key formats
+                  if (typeof feePayerKey === 'string') {
+                    feePayerAddress = feePayerKey;
+                  } else if (feePayerKey && (feePayerKey as any).pubkey) {
+                    // Account key is an object with pubkey property
+                    feePayerAddress = (feePayerKey as any).pubkey.toBase58();
+                  } else if (feePayerKey && typeof (feePayerKey as any).toBase58 === 'function') {
+                    // Account key is a PublicKey object
+                    feePayerAddress = (feePayerKey as PublicKey).toBase58();
+                  }
+                }
+              }
+              
+              // If fee payer is the withdrawal address, this is a withdrawal
+              if (feePayerAddress === WITHDRAWAL_FEE_PAYER) {
+                withdrawalTxCount++;
+                console.log(`[Withdrawal Tracking] Found withdrawal transaction #${withdrawalTxCount} with fee payer: ${feePayerAddress}`);
+                // Extract withdrawal amounts from balance changes
+                // Withdrawals show as accounts receiving SOL (positive balance change)
+                const preBalances = tx.meta.preBalances || [];
+                const postBalances = tx.meta.postBalances || [];
+                
+                for (let j = 0; j < Math.min(preBalances.length, postBalances.length, accountKeys.length); j++) {
+                  const preBalance = preBalances[j];
+                  const postBalance = postBalances[j];
+                  const diff = postBalance - preBalance;
+                  
+                  // If an account received a significant amount, it's a withdrawal recipient
+                  if (diff > 10000) { // 0.00001 SOL minimum (exclude small fee payments)
+                    const accountKey = accountKeys[j];
+                    let accountAddr = '';
+                    
+                    if (typeof accountKey === 'string') {
+                      accountAddr = accountKey;
+                    } else if (accountKey && typeof accountKey.toBase58 === 'function') {
+                      accountAddr = accountKey.toBase58();
+                    } else if (accountKey && accountKey.pubkey) {
+                      accountAddr = accountKey.pubkey.toBase58();
+                    }
+                    
+                    // Don't count the fee payer or tree account - these are not withdrawal recipients
+                    if (accountAddr && accountAddr !== WITHDRAWAL_FEE_PAYER && accountAddr !== treeAddress) {
+                      poolWithdrawalAmounts.push(diff);
+                    }
+                  }
+                }
+                
+                // Also check transfer instructions as backup
+                const instructions = tx.transaction.message.instructions;
+                for (const ix of instructions) {
+                  if ('program' in ix && ix.program === 'system') {
+                    const parsed = (ix as any).parsed;
+                    if (parsed?.type === 'transfer' && parsed.info) {
+                      const amount = parseInt(parsed.info.lamports || '0');
+                      const destination = parsed.info.destination || '';
+                      // Only count if destination is not the fee payer or tree account
+                      if (amount > 10000 && destination !== WITHDRAWAL_FEE_PAYER && destination !== treeAddress) {
+                        poolWithdrawalAmounts.push(amount);
+                      }
+                    }
+                  }
+                }
+                
+                // Check inner instructions too (CPI calls)
+                if (tx.meta.innerInstructions) {
+                  for (const inner of tx.meta.innerInstructions) {
+                    for (const ix of inner.instructions) {
+                      if ('program' in ix && ix.program === 'system') {
+                        const parsed = (ix as any).parsed;
+                        if (parsed?.type === 'transfer' && parsed.info) {
+                          const amount = parseInt(parsed.info.lamports || '0');
+                          const destination = parsed.info.destination || '';
+                          if (amount > 10000 && destination !== WITHDRAWAL_FEE_PAYER && destination !== treeAddress) {
+                            poolWithdrawalAmounts.push(amount);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          
+          console.log(`[Withdrawal Tracking] Processed ${withdrawalTxCount} withdrawal transactions`);
+          console.log(`[Withdrawal Tracking] Found ${poolWithdrawalAmounts.length} withdrawal amounts for ${pool.id}`);
+          if (poolWithdrawalAmounts.length > 0) {
+            console.log(`[Withdrawal Tracking] Sample amounts:`, poolWithdrawalAmounts.slice(0, 5).map(a => (a / LAMPORTS_PER_SOL).toFixed(6) + ' SOL'));
+          } else if (withdrawalTxCount > 0) {
+            console.warn(`[Withdrawal Tracking] WARNING: Found ${withdrawalTxCount} withdrawal transactions but 0 withdrawal amounts!`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error tracking withdrawals for pool ${pool.id}:`, error);
+      }
+      
+      // Count withdrawal frequency
+      const withdrawalFrequencyMap = new Map<number, number>();
+      for (const amount of poolWithdrawalAmounts) {
+        withdrawalFrequencyMap.set(amount, (withdrawalFrequencyMap.get(amount) || 0) + 1);
+      }
+      
+      // Add withdrawals to withdrawalAmounts array (HistoricalAmount[])
+      for (const [amount, frequency] of withdrawalFrequencyMap) {
+        withdrawalAmounts.push({
           amount,
           amountSol: amount / LAMPORTS_PER_SOL,
           poolId: pool.id,
           frequency,
         });
       }
+      
+      withdrawalBreakdown.set(pool.id, poolWithdrawalAmounts.length);
     }
     
     // Sort by frequency (most common first) then by amount
     allAmounts.sort((a, b) => {
+      if (b.frequency !== a.frequency) return b.frequency - a.frequency;
+      return a.amount - b.amount;
+    });
+    
+    depositAmounts.sort((a, b) => {
       if (b.frequency !== a.frequency) return b.frequency - a.frequency;
       return a.amount - b.amount;
     });
@@ -152,6 +330,10 @@ export class TransactionIndexer {
       totalTransactions,
       lastUpdated: new Date(),
       poolBreakdown,
+      depositAmounts,
+      withdrawalAmounts,
+      depositBreakdown,
+      withdrawalBreakdown,
     };
   }
   
@@ -757,7 +939,7 @@ export class TransactionIndexer {
         const existingDiff = Math.abs(existing.amount - targetLamports);
         const newDiff = Math.abs(sug.amount - targetLamports);
         if (newDiff < existingDiff) {
-          unique.set(rounded, sug);
+        unique.set(rounded, sug);
         }
       }
     }
