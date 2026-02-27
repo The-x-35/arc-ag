@@ -975,7 +975,7 @@ export default function ProdPage() {
               textAlign: 'center'
             }}>
               <div style={{ fontFamily: 'monospace', fontSize: '11px', color: '#999', marginBottom: '4px' }}>
-                Connected: {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
+                Connected: {publicKey?.toBase58().slice(0, 8)}...{publicKey?.toBase58().slice(-8)}
               </div>
             </div>
           </div>
