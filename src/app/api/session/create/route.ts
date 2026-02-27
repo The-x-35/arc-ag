@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,44 +20,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create session in database (session_word will be set to session ID after creation)
-    const { data, error } = await supabase
-      .from('transaction_sessions')
-      .insert({
-        wallet_address: walletAddress,
-        session_word: '', // Temporary, will update with session ID
-        current_step: 1,
-        status: 'pending',
-        transaction_params: transactionParams,
-        burner_addresses: [],
-        signatures: [],
-      })
-      .select()
-      .single();
+    // Create session in database; session_word will be set to the generated id
+    const rows = await query<{
+      id: string;
+    }>(
+      `
+      INSERT INTO transaction_sessions (
+        wallet_address,
+        session_word,
+        current_step,
+        status,
+        transaction_params,
+        burner_addresses,
+        signatures
+      )
+      VALUES ($1, '', 1, 'pending', $2::jsonb, '[]'::jsonb, '[]'::jsonb)
+      RETURNING id
+      `,
+      [walletAddress, JSON.stringify(transactionParams)]
+    );
 
-    if (error) {
-      console.error('Error creating session:', error);
-      return NextResponse.json(
-        { error: 'Failed to create session', details: error.message },
-        { status: 500 }
-      );
-    }
+    const created = rows[0];
 
-    // Update session_word to be the session ID
-    const { error: updateError } = await supabase
-      .from('transaction_sessions')
-      .update({ session_word: data.id })
-      .eq('id', data.id);
-
-    if (updateError) {
-      console.error('Error updating session word:', updateError);
-      // Continue anyway, session was created
+    // Update session_word to be the session ID (fire-and-forget; not critical for client)
+    if (created?.id) {
+      query(
+        `
+        UPDATE transaction_sessions
+        SET session_word = $1
+        WHERE id = $1
+        `,
+        [created.id]
+      ).catch((err) => {
+        console.error('Error updating session_word for transaction_sessions:', err);
+      });
     }
 
     return NextResponse.json({
       success: true,
-      sessionId: data.id,
-      word: data.id, // Session ID is the word
+      sessionId: created.id,
+      word: created.id, // Session ID is the word
     });
   } catch (error: any) {
     console.error('Error in create session endpoint:', error);

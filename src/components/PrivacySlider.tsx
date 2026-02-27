@@ -3,15 +3,14 @@
 import React from 'react';
 
 interface PrivacySliderProps {
-  value: number; // 0-100 (0 = 2 chunks/0min, 100 = 10 chunks/240min)
+  value: number; // 0-100, maps to 0-240 minutes
   onChange: (value: number) => void;
   onSettingsClick?: () => void;
   disabled?: boolean;
 }
 
 export default function PrivacySlider({ value, onChange, onSettingsClick, disabled }: PrivacySliderProps) {
-  // Linear mapping: value 0-100 maps to chunks 2-10 and time 0-240
-  const chunks = Math.round(2 + (value / 100) * 8);
+  // Linear mapping: value 0-100 maps to time 0-240 minutes
   const timeMinutes = Math.round((value / 100) * 240);
   const timeHours = Math.floor(timeMinutes / 60);
   const timeMins = timeMinutes % 60;
@@ -37,7 +36,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
           fontWeight: '700',
           fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
         }}>
-          Privacy Level
+          Time
         </label>
         <div style={{ 
           display: 'flex', 
@@ -49,7 +48,7 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
             fontSize: '13px',
             fontFamily: 'monospace'
           }}>
-            {chunks} parts, {formatTime()}
+            {formatTime()}
           </span>
           {onSettingsClick && (
             <button
@@ -127,8 +126,8 @@ export default function PrivacySlider({ value, onChange, onSettingsClick, disabl
         fontSize: '11px',
         color: '#666'
       }}>
-        <span>Low Privacy (2 parts, &lt;1 min)</span>
-        <span>High Privacy (10 parts, 4 hr)</span>
+        <span>Fast (&lt;1 min)</span>
+        <span>Slow (4 hr)</span>
       </div>
     </div>
   );

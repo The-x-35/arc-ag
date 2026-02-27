@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 /**
  * Validate invite code format (6 characters, A-Z0-9, uppercase)
@@ -43,13 +43,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if code exists and get current state
-    const { data: inviteCode, error: fetchError } = await supabase
-      .from('invite_codes')
-      .select('*')
-      .eq('code', normalizedCode)
-      .single();
+    const inviteRows = await query<any>(
+      `SELECT * FROM invite_codes WHERE code = $1 LIMIT 1`,
+      [normalizedCode]
+    );
 
-    if (fetchError || !inviteCode) {
+    const inviteCode = inviteRows[0];
+
+    if (!inviteCode) {
       return NextResponse.json(
         { success: false, error: 'Code not found' },
         { status: 404 }
@@ -65,35 +66,40 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if wallet already has a code
-    const { data: existingWalletCode } = await supabase
-      .from('invite_codes')
-      .select('code')
-      .eq('wallet_address', walletAddress)
-      .eq('is_used', true)
-      .single();
+    const existingWalletRows = await query<{ code: string }>(
+      `
+      SELECT code
+      FROM invite_codes
+      WHERE wallet_address = $1
+        AND is_used = true
+      LIMIT 1
+      `,
+      [walletAddress]
+    );
 
-    if (existingWalletCode) {
+    if (existingWalletRows[0]) {
       return NextResponse.json(
         { success: false, error: 'This wallet already has an invite code' },
         { status: 400 }
       );
     }
 
-    // Claim the code: update with wallet address and mark as used
-    // Use a transaction-like approach by checking is_used again in the update
-    const { data: updatedCode, error: updateError } = await supabase
-      .from('invite_codes')
-      .update({
-        wallet_address: walletAddress,
-        is_used: true,
-        used_at: new Date().toISOString()
-      })
-      .eq('code', normalizedCode)
-      .eq('is_used', false) // Only update if still unused (atomic check)
-      .select()
-      .single();
+    // Claim the code: update with wallet address and mark as used,
+    // only if it is still unused
+    const updatedRows = await query(
+      `
+      UPDATE invite_codes
+      SET wallet_address = $1,
+          is_used = true,
+          used_at = NOW()
+      WHERE code = $2
+        AND is_used = false
+      RETURNING *
+      `,
+      [walletAddress, normalizedCode]
+    );
 
-    if (updateError || !updatedCode) {
+    if (!updatedRows[0]) {
       // Code was claimed between our check and update
       return NextResponse.json(
         { success: false, error: 'Code was already claimed' },

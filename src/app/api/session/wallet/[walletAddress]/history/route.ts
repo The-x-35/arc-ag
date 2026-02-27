@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 export async function GET(
   request: NextRequest,
@@ -12,31 +12,26 @@ export async function GET(
     const limit = limitParam ? parseInt(limitParam) : undefined; // No limit by default
     const status = searchParams.get('status'); // Optional filter by status
 
-    let query = supabase
-      .from('transaction_sessions')
-      .select('*')
-      .eq('wallet_address', walletAddress)
-      .order('created_at', { ascending: false }); // Most recent first
-    
-    // Only apply limit if specified
-    if (limit !== undefined && limit > 0) {
-      query = query.limit(limit);
-    }
+    const values: any[] = [walletAddress];
+    const conditions: string[] = ['wallet_address = $1'];
 
-    // Filter by status if provided
     if (status) {
-      query = query.eq('status', status);
+      conditions.push(`status = $${values.length + 1}`);
+      values.push(status);
     }
 
-    const { data, error } = await query;
+    let sql = `
+      SELECT *
+      FROM transaction_sessions
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY created_at DESC
+    `;
 
-    if (error) {
-      console.error('Error fetching session history:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch session history', details: error.message },
-        { status: 500 }
-      );
+    if (limit !== undefined && limit > 0) {
+      sql += ` LIMIT ${limit}`;
     }
+
+    const data = await query(sql, values);
 
     return NextResponse.json({
       success: true,

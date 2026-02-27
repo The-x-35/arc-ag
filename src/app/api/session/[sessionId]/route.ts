@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 export async function GET(
   request: NextRequest,
@@ -8,23 +8,17 @@ export async function GET(
   try {
     const { sessionId } = params;
 
-    const { data, error } = await supabase
-      .from('transaction_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single();
+    const rows = await query(
+      `SELECT * FROM transaction_sessions WHERE id = $1`,
+      [sessionId]
+    );
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Session not found' },
-          { status: 404 }
-        );
-      }
-      console.error('Error fetching session:', error);
+    const data = rows[0];
+
+    if (!data) {
       return NextResponse.json(
-        { error: 'Failed to fetch session', details: error.message },
-        { status: 500 }
+        { error: 'Session not found' },
+        { status: 404 }
       );
     }
 
@@ -50,18 +44,44 @@ export async function PUT(
     const body = await request.json();
     const updates = body;
 
-    const { data, error } = await supabase
-      .from('transaction_sessions')
-      .update(updates)
-      .eq('id', sessionId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating session:', error);
+    // Build dynamic update query from provided fields
+    const keys = Object.keys(updates);
+    if (keys.length === 0) {
       return NextResponse.json(
-        { error: 'Failed to update session', details: error.message },
-        { status: 500 }
+        { error: 'No fields to update' },
+        { status: 400 }
+      );
+    }
+
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    keys.forEach((key, idx) => {
+      setClauses.push(`${key} = $${idx + 1}`);
+      values.push(
+        ['transaction_params', 'burner_addresses', 'chunk_amounts', 'signatures', 'used_deposit_amounts'].includes(
+          key
+        )
+          ? JSON.stringify(updates[key])
+          : updates[key]
+      );
+    });
+
+    values.push(sessionId);
+
+    const rows = await query(
+      `UPDATE transaction_sessions SET ${setClauses.join(', ')} WHERE id = $${
+        keys.length + 1
+      } RETURNING *`,
+      values
+    );
+
+    const data = rows[0];
+
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Session not found' },
+        { status: 404 }
       );
     }
 
@@ -85,18 +105,7 @@ export async function DELETE(
   try {
     const { sessionId } = params;
 
-    const { error } = await supabase
-      .from('transaction_sessions')
-      .delete()
-      .eq('id', sessionId);
-
-    if (error) {
-      console.error('Error deleting session:', error);
-      return NextResponse.json(
-        { error: 'Failed to delete session', details: error.message },
-        { status: 500 }
-      );
-    }
+    await query(`DELETE FROM transaction_sessions WHERE id = $1`, [sessionId]);
 
     return NextResponse.json({
       success: true,

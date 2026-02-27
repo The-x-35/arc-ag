@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 export async function GET(
   request: NextRequest,
@@ -9,22 +9,19 @@ export async function GET(
     const { walletAddress } = params;
 
     // Get active session (pending or in_progress) for this wallet
-    const { data, error } = await supabase
-      .from('transaction_sessions')
-      .select('*')
-      .eq('wallet_address', walletAddress)
-      .in('status', ['pending', 'in_progress'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const rows = await query(
+      `
+      SELECT *
+      FROM transaction_sessions
+      WHERE wallet_address = $1
+        AND status IN ('pending', 'in_progress')
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [walletAddress]
+    );
 
-    if (error) {
-      console.error('Error fetching session by wallet:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch session', details: error.message },
-        { status: 500 }
-      );
-    }
+    const data = rows[0];
 
     if (!data) {
       return NextResponse.json({

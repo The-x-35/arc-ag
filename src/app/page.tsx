@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { getSolanaRpc } from '@/lib/config/networks';
 import { poolRegistry } from '@/lib/pools/registry';
 import { privacyCashPool } from '@/lib/pools/privacy-cash';
@@ -18,6 +18,12 @@ import PrivacySettingsModal from '@/components/PrivacySettingsModal';
 import ProdMenu from '@/components/ProdMenu';
 import { calculatePrivacyScore, formatPrivacyScore, PrivacyScoreResult } from '@/lib/privacy/privacy-score';
 
+type WalletAsset = {
+  symbol: string;
+  amount: number;
+  usdValue?: number;
+};
+
 // Ensure pools are registered
 if (poolRegistry.isEmpty()) {
   poolRegistry.register(privacyCashPool);
@@ -30,12 +36,20 @@ export default function ProdPage() {
   const [amount, setAmount] = useState('');
   const [amountUnit, setAmountUnit] = useState<'SOL' | 'USD'>('SOL');
   
-  // Privacy slider state (0-100, maps to 2-10 chunks and 0-240 min)
-  const [privacySliderValue, setPrivacySliderValue] = useState(25); // Default: ~4 chunks, ~60 min
+  // Privacy slider state (0-100, maps to 0-240 min)
+  const [privacySliderValue, setPrivacySliderValue] = useState(25); // Default: ~60 min
   
   // Derived values from slider
-  const chunks = Math.round(2 + (privacySliderValue / 100) * 8);
   const delayMinutes = Math.round((privacySliderValue / 100) * 240);
+
+  // Derive number of parts (chunks) from delayMinutes internally
+  const chunks = (() => {
+    if (delayMinutes < 10) return 2;
+    if (delayMinutes < 60) return 4;
+    if (delayMinutes < 120) return 6;
+    if (delayMinutes < 180) return 8;
+    return 10;
+  })();
   
   // Settings modal state
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -83,6 +97,11 @@ export default function ProdPage() {
   const { getSessionHistory } = useSessionRecovery();
   const { price: solPrice } = useSolPrice();
   
+  // Wallet assets (left panel)
+  const [walletAssets, setWalletAssets] = useState<WalletAsset[]>([]);
+  const [walletTotalUsd, setWalletTotalUsd] = useState<number | null>(null);
+  const [walletAssetsLoading, setWalletAssetsLoading] = useState(false);
+  
   // Max transaction limit in USD (prod)
   const MAX_USD = 1000;
   const maxSolAmount = solPrice ? MAX_USD / solPrice : null;
@@ -98,10 +117,137 @@ export default function ProdPage() {
   const [validatingInviteCode, setValidatingInviteCode] = useState(false);
   const [inviteCodeError, setInviteCodeError] = useState<string | null>(null);
 
+  // Warn user when attempting to close/refresh tab during active transaction
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!loading) return;
+      event.preventDefault();
+      // Chrome requires returnValue to be set.
+      event.returnValue = '';
+    };
+
+    if (loading) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [loading]);
+
   // Initialize connection
   useEffect(() => {
     connectionRef.current = new Connection(getSolanaRpc('mainnet'), 'confirmed');
   }, []);
+
+  // Fetch wallet balances for left panel
+  useEffect(() => {
+    const fetchAssets = async () => {
+      if (!connected || !publicKey || !connectionRef.current) {
+        setWalletAssets([]);
+        setWalletTotalUsd(null);
+        return;
+      }
+
+      setWalletAssetsLoading(true);
+
+      try {
+        const connection = connectionRef.current;
+        const owner = publicKey;
+
+        // SOL balance
+        const solLamports = await connection.getBalance(owner);
+        const solAmount = solLamports / LAMPORTS_PER_SOL;
+
+        const assets: WalletAsset[] = [];
+        let totalUsd = 0;
+
+        if (solAmount > 0) {
+          const solUsd = solPrice ? solAmount * solPrice : undefined;
+          if (solUsd) totalUsd += solUsd;
+          assets.push({
+            symbol: 'SOL',
+            amount: solAmount,
+            usdValue: solUsd,
+          });
+        }
+
+        // SPL tokens (USDC, USDT, WETH) - approximate pricing (USDC/USDT ~= $1)
+        const tokenConfigs: {
+          symbol: string;
+          mint: PublicKey;
+          usdPeg?: number;
+        }[] = [
+          {
+            symbol: 'USDC',
+            mint: new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+            usdPeg: 1,
+          },
+          {
+            symbol: 'USDT',
+            mint: new PublicKey('Es9vMFrzaCERmJfrF7vCwTbk7C1hF9TZLx3hGk3gP4f3'),
+            usdPeg: 1,
+          },
+          {
+            symbol: 'WETH',
+            mint: new PublicKey('7vfCXTUXx5WJV5JADk17DUJ4ksgau7utjQp5zj7MT7iJ'),
+          },
+        ];
+
+        for (const cfg of tokenConfigs) {
+          try {
+            const resp = await connection.getParsedTokenAccountsByOwner(owner, {
+              mint: cfg.mint,
+            });
+
+            let uiAmount = 0;
+            for (const { account } of resp.value) {
+              const data: any = account.data;
+              const amtStr =
+                data?.parsed?.info?.tokenAmount?.uiAmountString ??
+                data?.parsed?.info?.tokenAmount?.uiAmount ??
+                '0';
+              const parsed = parseFloat(amtStr);
+              if (!Number.isNaN(parsed)) {
+                uiAmount += parsed;
+              }
+            }
+
+            if (uiAmount > 0) {
+              let usdValue: number | undefined;
+              if (cfg.usdPeg) {
+                usdValue = uiAmount * cfg.usdPeg;
+              }
+              if (usdValue) {
+                totalUsd += usdValue;
+              }
+              assets.push({
+                symbol: cfg.symbol,
+                amount: uiAmount,
+                usdValue,
+              });
+            }
+          } catch (err) {
+            console.error(`Failed to fetch ${cfg.symbol} balance:`, err);
+          }
+        }
+
+        setWalletAssets(assets);
+        setWalletTotalUsd(totalUsd || null);
+      } catch (err) {
+        console.error('Error fetching wallet assets:', err);
+      } finally {
+        setWalletAssetsLoading(false);
+      }
+    };
+
+    fetchAssets();
+
+    const interval = setInterval(fetchAssets, 30000);
+    return () => clearInterval(interval);
+  }, [connected, publicKey, solPrice]);
 
   // Check if wallet already has a validated invite code
   useEffect(() => {
@@ -211,7 +357,7 @@ export default function ProdPage() {
           chunks: [],
           totalLamports: 0,
           totalSol: 0,
-          error: `Amount is below minimum. Minimum is ${formatSolAmount(minAmount, solPrice, 3)} (${numChunks} parts × 0.035 SOL per part)`,
+          error: `Amount is below minimum. Minimum is ${formatSolAmount(minAmount, solPrice, 3)} (${numChunks} × 0.035 SOL per part)`,
         },
         suggestions: [],
       }));
@@ -281,7 +427,7 @@ export default function ProdPage() {
         suggestions = previousSuggestions;
       } else if (!splitResult.valid) {
         try {
-          suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
+        suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
           console.log('Generated suggestions:', suggestions.length, 'for', amountLamports / LAMPORTS_PER_SOL, 'SOL');
           if (suggestions.length === 0) {
             console.warn('No suggestions generated for amount:', amountLamports / LAMPORTS_PER_SOL, 'SOL');
@@ -436,7 +582,7 @@ export default function ProdPage() {
       }));
     }
   }, [selectedPools, solPrice, delayMinutes]);
-  
+
   // Debounced amount change handler
   useEffect(() => {
     const inputNum = parseFloat(amount);
@@ -686,13 +832,14 @@ export default function ProdPage() {
   })();
   
   return (
-    <main style={{ 
-      minHeight: '100vh', 
-      padding: '24px', 
-      maxWidth: '800px', 
-      margin: '0 auto',
-      background: '#fff'
-    }}>
+    <main
+      style={{
+        minHeight: '100vh',
+        padding: '24px',
+        background:
+          'radial-gradient(circle at top left, #f9fafb 0, #e5e7eb 35%, #e2e8f0 70%, #cbd5e1 100%)',
+      }}
+    >
       {/* Wallet Connect Screen - Show if not connected and not validated */}
       {!connected && !inviteCodeValidated && (
         <div style={{
@@ -835,59 +982,64 @@ export default function ProdPage() {
         </div>
       )}
 
-      {/* Main Form - Show only if validated */}
+      {/* Main UI - Show only if validated */}
       {inviteCodeValidated && (
-        <>
+        <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
       {/* Recovery Prompt */}
       {showRecoveryPrompt && connected && (
-        <div style={{
+            <div
+              style={{
           marginBottom: '24px',
           padding: '16px',
-          background: '#f5f5f5',
-          border: '1px solid #000',
-          borderRadius: '8px',
+                borderRadius: 24,
+                background: 'rgba(255,255,255,0.82)',
+                border: '1px solid rgba(148,163,184,0.45)',
+                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          gap: '16px'
-        }}>
+                gap: '16px',
+              }}
+            >
           <div style={{ flex: 1 }}>
-            <div style={{ color: '#000', fontWeight: '600', marginBottom: '4px' }}>
+                <div style={{ color: '#000', fontWeight: 600, marginBottom: 4 }}>
               Active Session Found
             </div>
-            <div style={{ color: '#666', fontSize: '13px' }}>
+                <div style={{ color: '#666', fontSize: 13 }}>
               You have an active transaction session. Would you like to recover and continue?
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={handleRecover}
               disabled={recovering}
               style={{
                 padding: '8px 16px',
-                background: '#000',
+                    background: '#000',
                 border: 'none',
-                borderRadius: '6px',
+                    borderRadius: 999,
                 color: '#fff',
-                fontWeight: '600',
+                    fontWeight: 600,
                 cursor: recovering ? 'not-allowed' : 'pointer',
                 opacity: recovering ? 0.6 : 1,
-                fontSize: '13px'
+                    fontSize: 13,
               }}
             >
-              {recovering ? 'Recovering...' : 'Recover'}
+                  {recovering ? 'Recovering...' : 'Recover'}
             </button>
             <button
-              onClick={() => setShowRecoveryPrompt(false)}
+                  onClick={() => setShowRecoveryPrompt(false)}
               disabled={recovering}
               style={{
                 padding: '8px 16px',
-                background: '#e5e5e5',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                color: '#000',
+                    background: 'rgba(255,255,255,0.7)',
+                    border: '1px solid rgba(148,163,184,0.8)',
+                    borderRadius: 999,
+                    color: '#000',
                 cursor: recovering ? 'not-allowed' : 'pointer',
-                fontSize: '13px'
+                    fontSize: 13,
               }}
             >
               Dismiss
@@ -897,78 +1049,214 @@ export default function ProdPage() {
       )}
       
       {/* Header */}
-      <header style={{ 
+          <header
+            style={{
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
         marginBottom: '32px',
-        paddingBottom: '16px',
-        borderBottom: '1px solid #ddd'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <img src="/image.png" alt="VPM Logo" style={{ height: '32px', width: 'auto' }} />
-          <h1 style={{ fontSize: '40px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <ProdMenu
-            onShowBurners={() => setShowBurnerWallets(!showBurnerWallets)}
-            onShowSettings={() => setShowSettingsModal(true)}
-            onRecoverSession={handleRecoverSession}
-          />
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <img src="/image.png" alt="VPM Logo" style={{ height: 32, width: 'auto' }} />
+              <h1
+              style={{
+                  fontSize: 40,
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  letterSpacing: '-0.02em',
+                  fontFamily:
+                    '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
+                }}
+              >
+                VPM
+              </h1>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <ProdMenu
+                onShowBurners={() => setShowBurnerWallets(!showBurnerWallets)}
+                onShowSettings={() => setShowSettingsModal(true)}
+                onRecoverSession={handleRecoverSession}
+              />
         </div>
       </header>
       
-      {/* Main Form */}
-        <div style={{
-        background: '#f5f5f5',
-        border: '1px solid #ddd',
-        borderRadius: '12px',
-        padding: '24px',
-        marginBottom: '24px'
-      }}>
-        {/* Wallet Connect */}
-        <div style={{ marginBottom: '20px' }}>
-          {connected && publicKey ? (
-          <div style={{
-              padding: '12px',
-              background: '#fff',
-              borderRadius: '8px',
-              border: '1px solid #ddd',
+          {/* Three-panel layout */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 24,
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* Left Panel: Wallet + Assets */}
+            <section
+              style={{
+                flex: '0 0 300px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                borderRadius: 24,
+                background: 'rgba(255,255,255,0.82)',
+                border: '1px solid rgba(148,163,184,0.45)',
+                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                padding: 20,
+              }}
+            >
+              <div
+                style={{
             display: 'flex',
             justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Connected</div>
-                <div style={{ fontFamily: 'monospace', fontSize: '13px', color: '#000' }}>
-                  {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
+            alignItems: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>
+                  Wallet Balance
+                </span>
+                <WalletMultiButton
+              style={{
+                    background: '#111827',
+                    borderRadius: 999,
+                    height: 32,
+                    fontSize: 11,
+                    paddingInline: 14,
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div
+                  style={{
+                    fontSize: 26,
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    letterSpacing: '-0.03em',
+                  }}
+                >
+                  {walletTotalUsd !== null ? `$${walletTotalUsd.toFixed(2)}` : '—'}
           </div>
+                {connected && publicKey && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: 11,
+                      color: '#9ca3af',
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {publicKey.toBase58().slice(0, 6)}...{publicKey.toBase58().slice(-6)}
             </div>
-              <WalletMultiButton style={{
-                background: '#ddd',
-                      borderRadius: '6px',
-                height: '32px',
-                      fontSize: '12px'
-              }} />
+                )}
+            </div>
+              <div
+                    style={{
+                  marginTop: 10,
+                  paddingTop: 10,
+                  borderTop: '1px dashed rgba(148,163,184,0.6)',
+                  fontSize: 11,
+                  color: '#9ca3af',
+                }}
+              >
+                {walletAssetsLoading
+                  ? 'Loading assets...'
+                  : walletAssets.length === 0
+                  ? 'No assets detected for this wallet yet.'
+                  : 'Assets'}
+              </div>
+              {walletAssets.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    maxHeight: 220,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {walletAssets.map((asset) => (
+                    <div
+                      key={asset.symbol}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 10px',
+                        borderRadius: 12,
+                        background: 'rgba(255,255,255,0.9)',
+                        border: '1px solid rgba(226,232,240,0.9)',
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: '#0f172a',
+                          }}
+                        >
+                          {asset.symbol}
                         </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-              <WalletMultiButton style={{
-                background: '#000',
-                borderRadius: '8px',
-                height: '44px',
-                fontSize: '14px',
-                fontWeight: '600'
-              }} />
-              <span style={{ fontSize: '12px', color: '#999' }}>
-                Connect your Solana wallet
-                      </span>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: '#6b7280',
+                            marginTop: 2,
+                          }}
+                        >
+                          {asset.amount.toFixed(4)} {asset.symbol}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#111827',
+                        }}
+                      >
+                        {asset.usdValue !== undefined
+                          ? `$${asset.usdValue.toFixed(2)}`
+                          : '—'}
                     </div>
-                      )}
                     </div>
-                    
-        {/* Destination */}
-        <div style={{ marginBottom: '20px' }}>
+                  ))}
+                </div>
+              )}
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 14,
+                  borderRadius: 18,
+                  background: 'rgba(248,250,252,0.9)',
+                  border: '1px dashed rgba(148,163,184,0.6)',
+                  fontSize: 11,
+                  color: '#6b7280',
+                  textAlign: 'center',
+                }}
+              >
+                More features like cards and analytics coming soon.
+                    </div>
+            </section>
+
+            {/* Middle Panel: Private Send Form */}
+            <section
+              style={{
+                flex: 1,
+                minWidth: 0,
+                borderRadius: 24,
+                background: 'rgba(255,255,255,0.94)',
+                border: '1px solid rgba(148,163,184,0.45)',
+                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                padding: 24,
+              }}
+            >
+              {/* Destination */}
+              <div style={{ marginBottom: '20px' }}>
           <label style={{ color: '#000', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
             Destination Address
           </label>
@@ -1372,8 +1660,8 @@ export default function ProdPage() {
               </span>
                       </div>
             <div style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-              Privacy Level: {chunks} parts, {delayMinutes === 0 ? '<1 min' : `${delayMinutes} min`}
-                    </div>
+              Privacy Delay: {delayMinutes === 0 ? '<1 min' : `${delayMinutes} min`}
+            </div>
                   </div>
         )}
         
@@ -1385,14 +1673,7 @@ export default function ProdPage() {
             onSettingsClick={() => setShowSettingsModal(true)}
             disabled={loading}
           />
-                </div>
-        
-        {/* Progress Bar */}
-        {steps.length > 0 && (
-          <div style={{ marginBottom: '24px' }}>
-            <PrivacyProgressBar steps={steps} />
           </div>
-        )}
 
         {/* Error Display */}
           {error && (
@@ -1477,18 +1758,91 @@ export default function ProdPage() {
               ? `Send ${formatSolAmount(amountSolForUi, solPrice, 6)} (Custom Split)` 
               : 'Enter valid amount'}
                 </button>
-              </div>
+      </section>
 
-      {/* Burner Wallets Section */}
-      {showBurnerWallets && burnerWallets && burnerWallets.length > 0 && (
+      {/* Right Panel: Steps / Progress */}
+      <section
+        style={{
+          flex: '0 0 300px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          borderRadius: 24,
+          background: 'rgba(255,255,255,0.9)',
+          border: '1px solid rgba(148,163,184,0.45)',
+          boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            padding: 10,
+            borderRadius: 999,
+            background: 'rgba(254,243,199,0.95)',
+            border: '1px solid rgba(234,179,8,0.7)',
+            fontSize: 11,
+            color: '#92400e',
+            textAlign: 'center',
+          }}
+        >
+          Do not close this webpage while the transaction is in progress.
+              </div>
+        {steps.length > 0 ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 12,
+                color: '#4b5563',
+              }}
+            >
+              <span>
+                {steps.filter((s) => s.status === 'completed').length} / {steps.length} steps
+              </span>
+              <span style={{ fontWeight: 600, color: '#111827' }}>
+                {loading ? 'Transaction In Progress' : 'Idle'}
+              </span>
+            </div>
+            <PrivacyProgressBar steps={steps} />
+          </div>
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 12,
+              color: '#9ca3af',
+              textAlign: 'center',
+            }}
+          >
+            No active transaction yet. Configure your private send in the middle panel and start
+            when ready.
+            </div>
+          )}
+      </section>
+          </div>
+
+          {/* Burner Wallets Section */}
+          {showBurnerWallets && burnerWallets && burnerWallets.length > 0 && (
+            <div
+              style={{
+                marginTop: 24,
+                borderRadius: 24,
+                background: 'rgba(255,255,255,0.94)',
+                border: '1px solid rgba(148,163,184,0.45)',
+                boxShadow: '0 18px 45px rgba(15,23,42,0.18)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                padding: 24,
+              }}
+            >
             <div style={{ 
-          background: '#f5f5f5',
-          border: '1px solid #ddd',
-          borderRadius: '12px',
-          padding: '24px',
-          marginBottom: '24px'
-        }}>
-          <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -1611,19 +1965,19 @@ export default function ProdPage() {
             </div>
             </div>
           )}
-      
-      {/* Settings Modal */}
-      <PrivacySettingsModal
-        isOpen={showSettingsModal}
-        onClose={() => setShowSettingsModal(false)}
-        chunks={chunks}
-        timeMinutes={delayMinutes}
-        onSave={handleSettingsSave}
-        selectedPools={selectedPools}
-        onPoolsChange={setSelectedPools}
-        availablePools={pools}
-      />
-        </>
+
+          {/* Settings Modal */}
+          <PrivacySettingsModal
+            isOpen={showSettingsModal}
+            onClose={() => setShowSettingsModal(false)}
+            chunks={chunks}
+            timeMinutes={delayMinutes}
+            onSave={handleSettingsSave}
+            selectedPools={selectedPools}
+            onPoolsChange={setSelectedPools}
+            availablePools={pools}
+          />
+        </div>
       )}
     </main>
   );

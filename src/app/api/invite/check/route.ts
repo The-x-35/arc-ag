@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db/supabase';
+import { query } from '@/lib/db/postgres';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,20 +16,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if wallet has a used invite code
-    const { data, error } = await supabase
-      .from('invite_codes')
-      .select('code, is_used')
-      .eq('wallet_address', walletAddress)
-      .eq('is_used', true)
-      .single();
+    const rows = await query<{ code: string; is_used: boolean }>(
+      `
+      SELECT code, is_used
+      FROM invite_codes
+      WHERE wallet_address = $1
+        AND is_used = true
+      LIMIT 1
+      `,
+      [walletAddress]
+    );
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Error checking invite code:', error);
-      return NextResponse.json(
-        { error: 'Failed to check invite code', details: error.message },
-        { status: 500 }
-      );
-    }
+    const data = rows[0];
 
     return NextResponse.json({
       hasInviteCode: !!data && data.is_used

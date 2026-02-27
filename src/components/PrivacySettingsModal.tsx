@@ -118,38 +118,6 @@ export default function PrivacySettingsModal({
           </button>
         </div>
 
-        {/* Chunks Slider */}
-        <div style={{ marginBottom: '24px' }}>
-          <label style={{
-            color: '#000',
-            display: 'block',
-            marginBottom: '8px',
-            fontSize: '14px',
-            fontWeight: '500'
-          }}>
-            Number of Parts: {chunks}
-          </label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '12px', color: '#666', minWidth: '20px' }}>2</span>
-            <input
-              type="range"
-              min={2}
-              max={10}
-              value={chunks}
-              onChange={(e) => setChunks(parseInt(e.target.value))}
-              style={{ flex: 1 }}
-            />
-            <span style={{ fontSize: '12px', color: '#666', minWidth: '20px' }}>10</span>
-          </div>
-          <div style={{
-            fontSize: '11px',
-            color: '#999',
-            marginTop: '4px'
-          }}>
-            More parts = more privacy, but higher fees
-          </div>
-        </div>
-
         {/* Time Slider */}
         <div style={{ marginBottom: '24px' }}>
           <label style={{
