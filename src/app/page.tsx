@@ -840,8 +840,8 @@ export default function ProdPage() {
           'radial-gradient(circle at top left, #f9fafb 0, #e5e7eb 35%, #e2e8f0 70%, #cbd5e1 100%)',
       }}
     >
-      {/* Wallet Connect Screen - Show if not connected and not validated */}
-      {!connected && !inviteCodeValidated && (
+      {/* Wallet Connect Screen - Show if not connected */}
+      {!connected && (
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -867,8 +867,8 @@ export default function ProdPage() {
         </div>
       )}
 
-      {/* Invite Code Input Screen - Show if connected but not validated */}
-      {connected && !inviteCodeValidated && publicKey && (
+      {/* Invite Code Input Screen - temporarily disabled */}
+      {false && connected && !inviteCodeValidated && publicKey && (
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -982,8 +982,8 @@ export default function ProdPage() {
         </div>
       )}
 
-      {/* Main UI - Show only if validated */}
-      {inviteCodeValidated && (
+      {/* Main UI - Show whenever wallet is connected (invite temporarily disabled) */}
+      {connected && (
         <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
       {/* Recovery Prompt */}
       {showRecoveryPrompt && connected && (
