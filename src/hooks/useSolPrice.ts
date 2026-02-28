@@ -65,15 +65,29 @@ export function formatSolWithUsd(sol: number, price: number | null): string {
 }
 
 // Always show USD first, SOL in parentheses
-export function formatAmountUsdFirst(sol: number, price: number | null, decimals: number = 6): string {
-  if (price === null) {
-    return `${sol.toFixed(decimals)} SOL`;
+export function formatAmountUsdFirst(sol: number | string, price: number | null, decimals: number = 6): string {
+  // Handle encrypted amounts (strings that look like base64) or invalid values
+  if (typeof sol === 'string') {
+    // Check if it looks like an encrypted base64 string (long, base64 chars)
+    if (sol.length > 20 && /^[A-Za-z0-9+/=]+$/.test(sol)) {
+      return 'Encrypted';
+    }
+    const solNum = parseFloat(sol);
+    if (isNaN(solNum) || !isFinite(solNum)) {
+      return 'N/A';
+    }
+    sol = solNum;
   }
-  const usd = sol * price;
-  return `$${usd.toFixed(2)} (${sol.toFixed(decimals)} SOL)`;
+  
+  const solNum = sol as number;
+  if (price === null) {
+    return `${solNum.toFixed(decimals)} SOL`;
+  }
+  const usd = solNum * price;
+  return `$${usd.toFixed(2)} (${solNum.toFixed(decimals)} SOL)`;
 }
 
 // Backwards-compat alias (keep old name if used elsewhere)
-export function formatSolAmount(sol: number, price: number | null, decimals: number = 6): string {
+export function formatSolAmount(sol: number | string, price: number | null, decimals: number = 6): string {
   return formatAmountUsdFirst(sol, price, decimals);
 }

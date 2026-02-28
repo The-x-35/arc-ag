@@ -18,7 +18,7 @@ import { transactionIndexer } from '@/lib/indexer/transaction-indexer';
 import { useSessionRecovery, SessionData } from './useSessionRecovery';
 import { generateAllBurners, getBurnerByIndex } from '@/lib/wallets/deterministic-eoa';
 import { keccak256, toBytes } from 'viem';
-import { encryptDestination, decryptDestination, isUUID } from '@/lib/encryption/destination-encryption';
+import { encryptDestination, decryptDestination, encryptAmount, decryptAmount } from '@/lib/encryption/destination-encryption';
 
 // Get RPC URL - same as wallet provider
 const getRpcUrl = () => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(WalletAdapterNetwork.Mainnet);
@@ -193,7 +193,8 @@ export function useWalletPrivateSend() {
    * Execute transaction with session recovery support
    */
   const execute = useCallback(async (params: WalletPrivateSendParams, recoveredSession?: SessionData) => {
-    const { destination, amount, numChunks, delayMinutes, sponsorFees, exactChunks } = params;
+    // Don't destructure destination yet - it may be encrypted and need decryption first
+    let { destination, amount, numChunks, delayMinutes, sponsorFees, exactChunks } = params;
     
     if (!connected || !publicKey || !signTransaction) {
       throw new Error('Wallet not connected');
@@ -255,22 +256,33 @@ export function useWalletPrivateSend() {
         updateStep(currentStep, 'running', 'Please sign the session ID to continue...');
         signedHash = await signMessageWithWallet(sessionWord);
         
-        // Decrypt destination address if it's encrypted (backward compat: try decrypt, fallback to plain text)
-        let destination = params.destination;
-        try {
-          destination = await decryptDestination(params.destination, signedHash);
-        } catch (err) {
-          // Backward compatibility: if decryption fails, assume it's plain text (old sessions)
-          console.warn('Decryption failed, using as plain text (backward compat):', err);
-          // destination remains as params.destination (plain text)
-        }
+        // Decrypt destination address and amount from session
+        const encryptedDestination = recoveredSession.transaction_params.destination;
+        const encryptedAmount = recoveredSession.transaction_params.amount;
+        console.log('[Recovery] Decrypting destination, encrypted length:', encryptedDestination?.length);
+        console.log('[Recovery] Decrypting amount, encrypted:', typeof encryptedAmount === 'string' ? 'yes' : 'no');
         
-        // Update params with decrypted destination
-        params.destination = destination;
+        const decryptedDestination = await decryptDestination(encryptedDestination, signedHash);
+        const decryptedAmount = typeof encryptedAmount === 'string' 
+          ? await decryptAmount(encryptedAmount, signedHash)
+          : encryptedAmount; // Fallback for old sessions with unencrypted amounts
+        
+        console.log('[Recovery] Destination decrypted successfully:', decryptedDestination?.slice(0, 8) + '...');
+        console.log('[Recovery] Amount decrypted successfully:', decryptedAmount);
+        
+        // Update params and local variables with decrypted values
+        params.destination = decryptedDestination;
+        params.amount = decryptedAmount;
+        destination = decryptedDestination; // Update local variable too
+        amount = decryptedAmount; // Update local variable too
       } else {
-        // Create new session
+        // Create new session WITHOUT destination and amount (will encrypt before storing)
         updateStep(1, 'running', 'Creating session...');
-        const session = await createSession(publicKey.toBase58(), params);
+        const session = await createSession(publicKey.toBase58(), {
+          ...params,
+          destination: 'ENCRYPTED_PLACEHOLDER', // Placeholder - will be replaced with encrypted value immediately
+          amount: 0, // Placeholder - will be replaced with encrypted value immediately
+        });
         sessionId = session.sessionId;
         sessionWord = session.word; // This is now the sessionId (UUID)
         setCurrentSessionId(sessionId);
@@ -279,21 +291,24 @@ export function useWalletPrivateSend() {
         updateStep(1, 'running', 'Please sign the session ID to generate deterministic wallets...');
         signedHash = await signMessageWithWallet(sessionWord);
         
-        // Encrypt destination address using signedHash
+        // Encrypt destination address and amount using signedHash
         const encryptedDestination = await encryptDestination(params.destination, signedHash);
+        const encryptedAmount = await encryptAmount(params.amount, signedHash);
         
-        // Update session with encrypted destination and status
+        // Update session with encrypted destination, amount, and status
         await updateSession(sessionId, {
           status: 'in_progress',
           transaction_params: {
             ...params,
             destination: encryptedDestination,
+            amount: encryptedAmount, // Store as encrypted string
           },
         });
       }
     } catch (err: any) {
       console.error('Session setup error:', err);
-      throw new Error(`Session setup failed: ${err.message}`);
+      const errorMessage = err?.message || err?.toString() || 'Unknown error';
+      throw new Error(`Session setup failed: ${errorMessage}`);
     }
 
     // If exact chunks provided, use their total, otherwise use amount
@@ -1154,14 +1169,22 @@ export function useWalletPrivateSend() {
       const sessionWord = session.session_word;
       
       // Request user to sign the session word/ID to get signedHash for decryption
-      // Note: This will be done again in execute() but we need it here for decryption
-      // We'll use signMessageWithWallet, but execute will handle it properly
-      // For now, we'll decrypt in execute() after signing
+      // We need to decrypt destination and amount here so UI can be updated before execute() runs
+      const signedHash = await signMessageWithWallet(sessionWord);
       
-      // Restore params from session (destination may be encrypted)
+      // Decrypt destination address and amount from session
+      const encryptedDestination = session.transaction_params.destination;
+      const encryptedAmount = session.transaction_params.amount;
+      
+      const decryptedDestination = await decryptDestination(encryptedDestination, signedHash);
+      const decryptedAmount = typeof encryptedAmount === 'string'
+        ? await decryptAmount(encryptedAmount, signedHash)
+        : encryptedAmount; // Fallback for old sessions with unencrypted amounts
+      
+      // Restore params from session with decrypted destination and amount
       const params: WalletPrivateSendParams = {
-        destination: session.transaction_params.destination, // May be encrypted, will decrypt in execute()
-        amount: session.transaction_params.amount,
+        destination: decryptedDestination,
+        amount: decryptedAmount,
         numChunks: session.transaction_params.numChunks,
         delayMinutes: session.transaction_params.delayMinutes,
         sponsorFees: false, // Default to false
@@ -1169,11 +1192,8 @@ export function useWalletPrivateSend() {
         selectedPools: session.transaction_params.selectedPools,
       };
       
-      // Continue execution from saved step (decryption will happen in execute after signing)
-      await execute(params, session);
-      
-      // Return params so UI can restore form state (decrypted destination will be in params)
-      return params;
+      // Return params and session so UI can be updated and execute can continue
+      return { params, session };
     } catch (err: any) {
       console.error('Recovery failed:', err);
       throw err;

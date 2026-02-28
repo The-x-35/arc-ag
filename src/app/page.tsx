@@ -613,16 +613,19 @@ export default function ProdPage() {
     setRecovering(true);
     setShowRecoveryPrompt(false);
     try {
-      const params = await recoverAndContinue();
-      if (params) {
-        setDestination(params.destination);
-        setAmount(params.amount.toString());
+      const result = await recoverAndContinue();
+      if (result && result.params) {
+        // Update UI with decrypted destination and amount
+        setDestination(result.params.destination);
+        setAmount(result.params.amount.toString());
         // Update slider to match session values
-        const sliderValue = Math.round(((params.numChunks - 2) / 8) * 100);
+        const sliderValue = Math.round(((result.params.numChunks - 2) / 8) * 100);
         setPrivacySliderValue(sliderValue);
-        if (params.selectedPools) {
-          setSelectedPools(params.selectedPools);
+        if (result.params.selectedPools) {
+          setSelectedPools(result.params.selectedPools);
         }
+        // Now execute the transaction with the decrypted params and session
+        await walletSend.execute(result.params, result.session);
       }
     } catch (err: any) {
       console.error('Recovery failed:', err);
@@ -630,25 +633,30 @@ export default function ProdPage() {
     } finally {
       setRecovering(false);
     }
-  }, [recoverAndContinue, publicKey]);
+  }, [recoverAndContinue, publicKey, walletSend]);
   
   // Handle session recovery from menu
   const handleRecoverSession = useCallback(async (session: SessionData) => {
     try {
-      const params = session.transaction_params;
-      setDestination(params.destination);
-      setAmount(params.amount.toString());
-      const sliderValue = Math.round(((params.numChunks - 2) / 8) * 100);
-      setPrivacySliderValue(sliderValue);
-      if (params.selectedPools) {
-        setSelectedPools(params.selectedPools);
+      // Get decrypted params from recoverAndContinue (this decrypts but doesn't execute)
+      const result = await recoverAndContinue(session);
+      if (result && result.params) {
+        // Update UI with decrypted destination and amount
+        setDestination(result.params.destination);
+        setAmount(result.params.amount.toString());
+        const sliderValue = Math.round(((result.params.numChunks - 2) / 8) * 100);
+        setPrivacySliderValue(sliderValue);
+        if (result.params.selectedPools) {
+          setSelectedPools(result.params.selectedPools);
+        }
+        // Now execute the transaction with the decrypted params and session
+        await walletSend.execute(result.params, result.session);
       }
-      await recoverAndContinue(session);
     } catch (err: any) {
       console.error('Failed to recover session:', err);
       alert(`Failed to recover session: ${err.message}`);
     }
-  }, [recoverAndContinue]);
+  }, [recoverAndContinue, walletSend]);
   
   // Validate invite code format
   const isValidCodeFormat = useCallback((code: string): boolean => {
