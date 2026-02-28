@@ -120,6 +120,12 @@ export default function ProdPage() {
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [timerStartTime, setTimerStartTime] = useState<number | null>(null);
   
+  // Passcode protection state
+  const [passcode, setPasscode] = useState('');
+  const [passcodeValidated, setPasscodeValidated] = useState(false);
+  const [passcodeError, setPasscodeError] = useState<string | null>(null);
+  const [validatingPasscode, setValidatingPasscode] = useState(false);
+  
   // Timer effect - show timer when transaction is active
   useEffect(() => {
     if (steps.length === 0 || !loading) {
@@ -237,6 +243,16 @@ export default function ProdPage() {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [connected, publicKey, getSessionHistory]);
+
+  // Check localStorage for passcode validation on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('vpm_passcode_validated');
+      if (stored === 'true') {
+        setPasscodeValidated(true);
+      }
+    }
+  }, []);
 
   // Check if wallet already has a validated invite code
   useEffect(() => {
@@ -813,6 +829,29 @@ export default function ProdPage() {
   const underMax = !maxSolAmount || amountSolForUi <= maxSolAmount;
   const isFormValid = connected && destination && amount && meetsMinimum && underMax && !loading;
   
+  // Passcode validation handler
+  const handlePasscodeSubmit = () => {
+    if (validatingPasscode) return;
+    
+    setValidatingPasscode(true);
+    setPasscodeError(null);
+    
+    // Validate passcode
+    if (passcode === '69420') {
+      setPasscodeValidated(true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('vpm_passcode_validated', 'true');
+      }
+      setPasscode('');
+      setPasscodeError(null);
+    } else {
+      setPasscodeError('Incorrect passcode. Please try again.');
+      setPasscode('');
+    }
+    
+    setValidatingPasscode(false);
+  };
+  
   // Display-only equivalent for the other currency
   const equivalentText = (() => {
     if (!solPrice || !amount) return '';
@@ -821,7 +860,7 @@ export default function ProdPage() {
     if (amountUnit === 'SOL') {
       const usd = amountSolForUi * solPrice;
       if (!isFinite(usd)) return '';
-      return `($${usd.toFixed(2)})`;
+      return `~$${Math.round(usd)}`;
     } else {
       const sol = inputNum / solPrice;
       if (!isFinite(sol)) return '';
@@ -830,6 +869,161 @@ export default function ProdPage() {
   })();
   
   const walletAddress = publicKey?.toBase58();
+  
+  // Passcode protection screen
+  if (!passcodeValidated) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          padding: '24px',
+          background: '#FFFFFF',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            maxWidth: '400px',
+            borderRadius: 20,
+            background: 'rgba(255, 255, 255, 0.20)',
+            border: '1px solid rgba(255, 255, 255, 0.4)',
+            boxShadow: `
+              inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+              inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+              inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+              0 4px 12px rgba(0, 0, 0, 0.05)
+            `,
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            overflow: 'hidden',
+            padding: '32px',
+          }}
+        >
+          {/* Gradient overlay for glassy effect */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'linear-gradient(135deg, rgba(52, 52, 52, 0.05) 0%, rgba(207, 207, 207, 0.1) 50%, rgba(255, 255, 255, 0.4) 100%)',
+              pointerEvents: 'none',
+              borderRadius: 20,
+            }}
+          />
+          
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', justifyContent: 'center' }}>
+              <img src="/image.png" alt="Privacy Logo" style={{ height: '48px', width: 'auto' }} />
+              <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: 'SF Pro Rounded' }}>Privacy</h1>
+            </div>
+            
+            <h2 style={{ 
+              fontSize: '40px', 
+              fontWeight: '700', 
+              color: '#000', 
+              marginBottom: '8px', 
+              textAlign: 'center', 
+              letterSpacing: '-0.02em', 
+              fontFamily: 'SF Pro Rounded' 
+            }}>
+              Enter Passcode
+            </h2>
+            
+            <p style={{ 
+              color: '#666', 
+              fontSize: '14px', 
+              textAlign: 'center', 
+              marginBottom: '24px',
+              fontFamily: 'SF Pro Rounded'
+            }}>
+              Please enter the passcode to access Privacy
+            </p>
+            
+            {/* Input Field */}
+            <div style={{ marginBottom: '16px' }}>
+              <input
+                type="number"
+                value={passcode}
+                onChange={(e) => {
+                  setPasscode(e.target.value);
+                  setPasscodeError(null);
+                }}
+                placeholder="Enter passcode"
+                disabled={validatingPasscode}
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '14px 16px',
+                  background: '#fff',
+                  border: `1px solid ${passcodeError ? '#ef4444' : '#ddd'}`,
+                  borderRadius: '12px',
+                  color: '#000',
+                  fontSize: '18px',
+                  textAlign: 'center',
+                  fontFamily: 'SF Pro Rounded',
+                  fontWeight: '600',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && passcode.length > 0) {
+                    handlePasscodeSubmit();
+                  }
+                }}
+              />
+              
+              {/* Error Message */}
+              {passcodeError && (
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: '#fef2f2',
+                  border: '1px solid #ef4444',
+                  borderRadius: '6px',
+                  color: '#ef4444',
+                  fontSize: '13px',
+                  textAlign: 'center',
+                  fontFamily: 'SF Pro Rounded',
+                }}>
+                  {passcodeError}
+                </div>
+              )}
+            </div>
+            
+            {/* Submit Button */}
+            <button
+              type="button"
+              onClick={handlePasscodeSubmit}
+              disabled={validatingPasscode || passcode.length === 0}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: passcode.length > 0 && !validatingPasscode ? '#000' : '#ccc',
+                border: 'none',
+                borderRadius: '12px',
+                color: '#fff',
+                fontSize: '16px',
+                fontWeight: '600',
+                fontFamily: 'SF Pro Rounded',
+                cursor: passcode.length > 0 && !validatingPasscode ? 'pointer' : 'not-allowed',
+                opacity: passcode.length > 0 && !validatingPasscode ? 1 : 0.6,
+              }}
+            >
+              {validatingPasscode ? 'Validating...' : 'Submit'}
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
   
   return (
     <main
@@ -852,8 +1046,8 @@ export default function ProdPage() {
           margin: '0 auto'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-            <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
-            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: 'SF Pro Rounded' }}>VPM</h1>
+            <img src="/image.png" alt="Privacy Logo" style={{ height: '48px', width: 'auto' }} />
+            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: 'SF Pro Rounded' }}>Privacy</h1>
           </div>
           <div style={{
             background: '#f5f5f5',
@@ -866,7 +1060,7 @@ export default function ProdPage() {
               Enter Invite Code
             </h2>
             <p style={{ color: '#666', fontSize: '14px', textAlign: 'center', marginBottom: '24px' }}>
-              Please enter your 6-character invite code to access VPM
+              Please enter your 6-character invite code to access Privacy
             </p>
             
             <div style={{ marginBottom: '16px' }}>
@@ -1026,10 +1220,11 @@ export default function ProdPage() {
         justifyContent: 'space-between', 
         alignItems: 'center',
         marginBottom: '32px',
+        height: '40px',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src="/image.png" alt="VPM Logo" style={{ height: 32, width: 'auto' }} />
+              <img src="/image.png" alt="Privacy Logo" style={{ height: 32, width: 'auto' }} />
               <h1
               style={{
                   fontSize: 40,
@@ -1039,7 +1234,7 @@ export default function ProdPage() {
                   fontFamily: 'SF Pro Rounded',
                 }}
               >
-                VPM
+                Privacy
               </h1>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1075,7 +1270,7 @@ export default function ProdPage() {
                 style={{
                   position: 'relative',
                   width: 300,
-                  height: 207,
+                  height: 247,
                   borderRadius: 20,
                   background: 'rgba(255, 255, 255, 0.20)',
                   border: '1px solid rgba(255, 255, 255, 0.4)',
@@ -1181,6 +1376,116 @@ export default function ProdPage() {
                       : '$0.00'}
           </div>
                 </div>
+
+                {/* SOL Asset Entry */}
+                {connected && solBalance > 0 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 20,
+                      top: 130,
+                      width: 260,
+                      height: 40,
+                      display: 'flex',
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {/* Left side: Logo, Name, Amount */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      {/* SOL Logo */}
+                      <div
+                        style={{
+                          width: 24,
+                          height: 24,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <img
+                          src="/sol.svg"
+                          alt="Solana"
+                          style={{
+                            width: 24,
+                            height: 24,
+                            display: 'block',
+                          }}
+                        />
+                      </div>
+                      {/* Asset Name and Amount */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontFamily: 'SF Pro Rounded',
+                            fontStyle: 'normal',
+                            fontWeight: 500,
+                            fontSize: 14,
+                            lineHeight: '16px',
+                            color: '#343434',
+                          }}
+                        >
+                          Solana
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: 'SF Pro Rounded',
+                            fontStyle: 'normal',
+                            fontWeight: 400,
+                            fontSize: 12,
+                            lineHeight: '14px',
+                            color: '#343434',
+                            opacity: 0.6,
+                          }}
+                        >
+                          {solBalance.toFixed(4)} SOL
+                        </div>
+                      </div>
+                    </div>
+                    {/* Right side: USD Value */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-end',
+                        gap: 2,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: 'SF Pro Rounded',
+                          fontStyle: 'normal',
+                          fontWeight: 500,
+                          fontSize: 14,
+                          lineHeight: '16px',
+                          color: '#343434',
+                        }}
+                      >
+                        {solPrice
+                          ? `$${(solBalance * solPrice).toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`
+                          : '$0.00'}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Three dots menu */}
                 <button
@@ -1552,42 +1857,6 @@ export default function ProdPage() {
                   )}
                 </div>
               </div>
-
-              {/* Third Card - Banner */}
-              <div
-                style={{
-                  position: 'relative',
-                  width: 300,
-                  height: 207,
-                  borderRadius: 20,
-                  background: 'linear-gradient(135deg, rgba(245, 245, 245, 0.2) 0%, rgba(255, 255, 255, 0.7) 100%)',
-                  border: '1px solid rgba(255, 255, 255, 0.4)',
-                  boxShadow: `
-                    inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
-                    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
-                    inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
-                    inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
-                    0 4px 12px rgba(0, 0, 0, 0.05)
-                  `,
-                  backdropFilter: 'blur(20px) saturate(180%)',
-                  WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Gradient overlay for glassy effect */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'linear-gradient(135deg, rgba(230, 230, 230, 0.1) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                    pointerEvents: 'none',
-                    borderRadius: 20,
-                  }}
-                />
-                    </div>
             </section>
 
             {/* Middle Panel: Private Send Form */}
@@ -1654,13 +1923,13 @@ export default function ProdPage() {
                   margin: 0,
                   marginBottom: '15px'
                 }}>
-                  Send
+                  Private Send
                 </h2>
 
                 {/* Enter Amount Section */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', margin: 0, marginBottom: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '164px', height: '19px', margin: 0 }}>
-                    <img src="/assets.svg" alt="Amount" style={{ width: '19px', height: '19px', display: 'block', flexShrink: 0, margin: 0 }} />
+                    <img src="/sol.svg" alt="Amount" style={{ width: '19px', height: '19px', display: 'block', flexShrink: 0, margin: 0 }} />
                     <label style={{
                       fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
@@ -1672,7 +1941,7 @@ export default function ProdPage() {
                       margin: 0,
                       padding: 0
                     }}>
-                      Enter Amount
+                      Enter SOL Amount
                     </label>
                   </div>
                   
@@ -1686,101 +1955,10 @@ export default function ProdPage() {
                     width: '100%',
                     border: '1px solid #E8E8E8',
                     borderRadius: '12px',
-                    background: '#fff'
+                    background: 'transparent'
                   }}>
-                    {/* Left side: max/half buttons and amount */}
+                    {/* Left side: amount */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flex: 1, minWidth: 0 }}>
-                      {/* Max/Half buttons */}
-                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px', height: '30px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '6px' }}>
-              <button
-                type="button"
-                            onClick={() => {
-                              if (solBalance > 0) {
-                                const maxAmount = maxSolAmount ? Math.min(solBalance, maxSolAmount) : solBalance;
-                                if (amountUnit === 'USD' && solPrice) {
-                                  setAmount((maxAmount * solPrice).toString());
-                                } else {
-                                  setAmount(maxAmount.toString());
-                                }
-                              }
-                            }}
-                            disabled={loading || solBalance <= 0}
-                        style={{
-                              display: 'flex',
-                              flexDirection: 'row',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              padding: '8.64px 11.52px',
-                              gap: '5.76px',
-                              width: '40px',
-                              height: '30px',
-                              background: 'rgba(255, 255, 255, 0.18)',
-                              boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03)',
-                              borderRadius: '10px',
-                          border: 'none',
-                              cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
-                              opacity: loading || solBalance <= 0 ? 0.5 : 1
-                            }}
-                          >
-                            <span style={{
-                              fontFamily: 'SF Pro Rounded',
-                              fontStyle: 'normal',
-                              fontWeight: 500,
-                              fontSize: '10px',
-                              lineHeight: '12px',
-                              textAlign: 'center',
-                              color: '#343434'
-                            }}>
-                              max
-                            </span>
-              </button>
-              <button
-                type="button"
-                            onClick={() => {
-                              if (solBalance > 0) {
-                                const half = solBalance / 2;
-                                const maxAmount = maxSolAmount ? Math.min(half, maxSolAmount) : half;
-                                if (amountUnit === 'USD' && solPrice) {
-                                  setAmount((maxAmount * solPrice).toString());
-                                } else {
-                                  setAmount(maxAmount.toString());
-                                }
-                              }
-                            }}
-                            disabled={loading || solBalance <= 0}
-                style={{
-                              display: 'flex',
-                              flexDirection: 'row',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              padding: '8.64px 11.52px',
-                              gap: '5.76px',
-                              width: '40px',
-                              height: '30px',
-                              background: 'rgba(255, 255, 255, 0.18)',
-                              boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03)',
-                              borderRadius: '10px',
-                  border: 'none',
-                              cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
-                              opacity: loading || solBalance <= 0 ? 0.5 : 1
-                            }}
-                          >
-                            <span style={{
-                              fontFamily: 'SF Pro Rounded',
-                              fontStyle: 'normal',
-                              fontWeight: 500,
-                              fontSize: '10px',
-                              lineHeight: '12px',
-                              textAlign: 'center',
-                              color: '#343434'
-                            }}>
-                              half
-                            </span>
-                      </button>
-                        </div>
-            </div>
-
                       {/* Amount display and USD equivalent */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%', minWidth: 0 }}>
                         <div style={{
@@ -1883,109 +2061,93 @@ export default function ProdPage() {
         </div>
         </div>
 
-                    {/* SOL button on right */}
-                    <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: '9px 15px', gap: '8px', width: '108px', height: '55px', background: 'rgba(0, 0, 0, 0.004)', boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9', borderRadius: '10px' }}>
-                      <div style={{ width: '38px', height: '38px', background: '#F4F4F4', borderRadius: '157.984px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {amountUnit === 'SOL' ? (
-                          <img src="/sol.svg" alt="SOL" style={{ width: '17px', height: '14px' }} />
-                        ) : (
-                          <span style={{ fontSize: '20px' }}>☰</span>
-                        )}
-                      </div>
-                      <span style={{
-                        fontFamily: 'SF Pro Rounded',
-                        fontStyle: 'normal',
-                        fontWeight: 300,
-                        fontSize: '18px',
-                        lineHeight: '21px',
-                textAlign: 'center',
-                        letterSpacing: '0.03em',
-                        color: '#000000'
-                      }}>
-                        {amountUnit}
-                  </span>
-          </div>
+                    {/* Half/Max buttons on right */}
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '4px', width: '44px', height: '55px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (solBalance > 0) {
+                            const half = solBalance / 2;
+                            const maxAmount = maxSolAmount ? Math.min(half, maxSolAmount) : half;
+                            if (amountUnit === 'USD' && solPrice) {
+                              setAmount((maxAmount * solPrice).toString());
+                            } else {
+                              setAmount(maxAmount.toString());
+                            }
+                          }
+                        }}
+                        disabled={loading || solBalance <= 0}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          padding: '4px 8px',
+                          width: '44px',
+                          height: '33px',
+                          background: 'rgba(0, 0, 0, 0.004)',
+                          boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
+                          opacity: loading || solBalance <= 0 ? 0.5 : 1
+                        }}
+                      >
+                        <span style={{
+                          fontFamily: 'SF Pro Rounded',
+                          fontStyle: 'normal',
+                          fontWeight: 500,
+                          fontSize: '11px',
+                          lineHeight: '12px',
+                          textAlign: 'center',
+                          color: '#343434'
+                        }}>
+                          half
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (solBalance > 0) {
+                            const maxAmount = maxSolAmount ? Math.min(solBalance, maxSolAmount) : solBalance;
+                            if (amountUnit === 'USD' && solPrice) {
+                              setAmount((maxAmount * solPrice).toString());
+                            } else {
+                              setAmount(maxAmount.toString());
+                            }
+                          }
+                        }}
+                        disabled={loading || solBalance <= 0}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          padding: '4px 8px',
+                          width: '44px',
+                          height: '33px',
+                          background: 'rgba(0, 0, 0, 0.004)',
+                          boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
+                          opacity: loading || solBalance <= 0 ? 0.5 : 1
+                        }}
+                      >
+                        <span style={{
+                          fontFamily: 'SF Pro Rounded',
+                          fontStyle: 'normal',
+                          fontWeight: 500,
+                          fontSize: '11px',
+                          lineHeight: '12px',
+                          textAlign: 'center',
+                          color: '#343434'
+                        }}>
+                          max
+                        </span>
+                      </button>
+                    </div>
         </div>
                 </div>
         
-                {/* Destination Address Section */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', margin: 0, marginBottom: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '163px', height: '19px', margin: 0 }}>
-                    <img src="/wallet.svg" alt="Destination" style={{ width: '18px', height: '18px', display: 'block', flexShrink: 0, opacity: 0.5, margin: 0 }} />
-                    <label style={{
-                      fontFamily: 'SF Pro Rounded',
-                      fontStyle: 'normal',
-                      fontWeight: 400,
-                      fontSize: '16px',
-                      lineHeight: '19px',
-                      color: '#343434',
-                      opacity: 0.5,
-                      whiteSpace: 'nowrap',
-                      margin: 0,
-                      padding: 0
-                    }}>
-                      Destination Address
-                    </label>
-                </div>
-        <div style={{ 
-                    boxSizing: 'border-box',
-                  display: 'flex', 
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                  alignItems: 'center', 
-                    padding: '20px 15px',
-                    gap: '10px',
-                    width: '100%',
-                    border: '1px solid #E8E8E8',
-                    borderRadius: '8px',
-                    background: '#fff'
-                  }}>
-                    <input
-                      type="text"
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value)}
-                      placeholder="Solana wallet address"
-                          disabled={loading}
-                      required
-                          style={{
-                        flex: 1,
-                        background: 'transparent',
-                        border: 'none',
-                            color: '#000',
-                        fontSize: '16px',
-                        lineHeight: '19px',
-                        fontFamily: 'SF Pro Rounded',
-                        fontStyle: 'normal',
-                        fontWeight: 400,
-                        outline: 'none',
-                        margin: 0,
-                        padding: 0,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        minWidth: 0
-                      }}
-                    />
-                    {destination && isValidSolanaAddress(destination) && (
-                            <div style={{ 
-                        display: 'flex',
-                        flexDirection: 'row',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        padding: '6.048px 8.064px',
-                        gap: '4.03px',
-                        width: '20.3px',
-                        height: '20.3px',
-                        background: '#42D17B',
-                        boxShadow: '0px 2.8px 8.4px rgba(0, 0, 0, 0.03)',
-                        borderRadius: '35.7px'
-                      }}>
-                        <span style={{ color: '#FFFFFF', fontSize: '13.44px', lineHeight: '13.44px' }}>✓</span>
-                            </div>
-                          )}
-              </div>
-                  </div>
-
         
                 {/* Transfer Time Section */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
@@ -2000,24 +2162,6 @@ export default function ProdPage() {
                     }}>
                       Transfer Time
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowSettingsModal(true)}
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: 0,
-                        width: '20px',
-                        height: '20px',
-                        background: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <img src="/gear.svg" alt="Settings" style={{ width: '20px', height: '20px' }} />
-                    </button>
                       </div>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '17px', width: '100%' }}>
                     {[
@@ -2093,6 +2237,69 @@ export default function ProdPage() {
                       </div>
           </div>
 
+                {/* Destination Address Section */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', margin: 0, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '163px', height: '19px', margin: 0 }}>
+                </div>
+        <div style={{ 
+                    boxSizing: 'border-box',
+                  display: 'flex', 
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                  alignItems: 'center', 
+                    padding: '20px 15px',
+                    gap: '10px',
+                    width: '100%',
+                    border: '1px solid #E8E8E8',
+                    borderRadius: '8px',
+                    background: 'transparent'
+                  }}>
+                    <input
+                      type="text"
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      placeholder="enter receiver's wallet address"
+                          disabled={loading}
+                      required
+                          style={{
+                        flex: 1,
+                        background: 'transparent',
+                        border: 'none',
+                            color: '#000',
+                        fontSize: '16px',
+                        lineHeight: '19px',
+                        fontFamily: 'SF Pro Rounded',
+                        fontStyle: 'normal',
+                        fontWeight: 400,
+                        outline: 'none',
+                        margin: 0,
+                        padding: 0,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        minWidth: 0
+                      }}
+                    />
+                    {destination && isValidSolanaAddress(destination) && (
+                            <div style={{ 
+                        display: 'flex',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: '6.048px 8.064px',
+                        gap: '4.03px',
+                        width: '20.3px',
+                        height: '20.3px',
+                        background: '#42D17B',
+                        boxShadow: '0px 2.8px 8.4px rgba(0, 0, 0, 0.03)',
+                        borderRadius: '35.7px'
+                      }}>
+                        <span style={{ color: '#FFFFFF', fontSize: '13.44px', lineHeight: '13.44px' }}>✓</span>
+                            </div>
+                          )}
+              </div>
+                  </div>
+
         {/* Error Display */}
           {error && (
             <div style={{ 
@@ -2154,8 +2361,23 @@ export default function ProdPage() {
                 {/* Review Button */}
                 <button 
           type="button"
-          onClick={handleSubmit}
-          disabled={!isFormValid}
+          onClick={async () => {
+            if (!destination) {
+              // Paste from clipboard
+              try {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                  setDestination(text.trim());
+                }
+              } catch (err) {
+                console.error('Failed to paste from clipboard:', err);
+              }
+            } else {
+              // Submit form
+              handleSubmit();
+            }
+          }}
+          disabled={loading}
                   style={{
                     boxSizing: 'border-box',
                     display: 'flex',
@@ -2167,11 +2389,11 @@ export default function ProdPage() {
             width: '100%',
                     height: '68px',
                     background: 'rgba(0, 0, 0, 0.004)',
-                    opacity: !isFormValid ? 0.3 : 1,
+                    opacity: loading ? 0.3 : 1,
                     border: '2px solid #FFFFFF',
                     boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
                     borderRadius: '15px',
-                    cursor: isFormValid ? 'pointer' : 'not-allowed'
+                    cursor: loading ? 'not-allowed' : 'pointer'
                   }}
                 >
                   <span style={{
@@ -2183,7 +2405,7 @@ export default function ProdPage() {
                     textAlign: 'center',
                     color: '#000000'
                   }}>
-                    {loading ? 'Processing...' : 'Review'}
+                    {loading ? 'Processing...' : (!destination ? 'paste destination wallet address' : 'Review')}
                   </span>
                 </button>
                 </div>
@@ -2372,7 +2594,17 @@ export default function ProdPage() {
                 ].map((stepInfo, index) => {
                   const stepId = index + 1;
                   const step = steps.find(s => s.id === stepId);
-                  const status = step?.status || 'pending';
+                  
+                  // Find the current active/running step
+                  const currentStep = steps.find(s => s.status === 'running');
+                  const currentStepId = currentStep?.id || 0;
+                  
+                  // If current step is ahead of this step, mark it as completed (even if skipped)
+                  let status = step?.status || 'pending';
+                  if (!step && currentStepId > stepId) {
+                    status = 'completed';
+                  }
+                  
                   const message = step?.message || (status === 'running' ? stepInfo.description : undefined);
                   
                   return (
@@ -2900,7 +3132,7 @@ export default function ProdPage() {
               <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 20 }}>
                 {/* Header */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: 16, fontWeight: 500, color: '#000', fontFamily: 'SF Pro Rounded' }}>What's Protecting me</span>
+                  <span style={{ fontSize: 16, fontWeight: 500, color: '#000', fontFamily: 'SF Pro Rounded' }}>What's Protecting you</span>
                 </div>
                 
                 {/* Protection Features */}
@@ -2936,7 +3168,7 @@ export default function ProdPage() {
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 12, color: '#666', lineHeight: '1.5', fontFamily: 'SF Pro Rounded' }}>
-                        Unique wallet addresses: Fresh wallets are used to avoid linkage, never reused
+                        Unique wallet addresses: Fresh wallets are used to avoid linkage
                       </div>
                     </div>
                   </div>
