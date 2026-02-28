@@ -7,7 +7,6 @@ import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { getSolanaRpc } from '@/lib/config/networks';
 import { poolRegistry } from '@/lib/pools/registry';
 import { privacyCashPool } from '@/lib/pools/privacy-cash';
-import { shadowPayPool } from '@/lib/pools/shadowpay';
 import { transactionIndexer } from '@/lib/indexer/transaction-indexer';
 import { useWalletPrivateSend } from '@/hooks/useWalletPrivateSend';
 import { useSessionRecovery, SessionData } from '@/hooks/useSessionRecovery';
@@ -18,16 +17,10 @@ import PrivacySettingsModal from '@/components/PrivacySettingsModal';
 import ProdMenu from '@/components/ProdMenu';
 import { calculatePrivacyScore, formatPrivacyScore, PrivacyScoreResult } from '@/lib/privacy/privacy-score';
 
-type WalletAsset = {
-  symbol: string;
-  amount: number;
-  usdValue?: number;
-};
 
 // Ensure pools are registered
 if (poolRegistry.isEmpty()) {
   poolRegistry.register(privacyCashPool);
-  poolRegistry.register(shadowPayPool);
 }
 
 export default function ProdPage() {
@@ -89,18 +82,20 @@ export default function ProdPage() {
   const connectionRef = useRef<Connection | null>(null);
   
   // Wallet state
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, disconnect } = useWallet();
   
   // Hooks
   const walletSend = useWalletPrivateSend();
-  const { steps, loading, error, result, reset, burnerWallets, recoverAndContinue, hasActiveSession } = walletSend;
+  const { steps, loading, error, result, reset, burnerWallets, recoverAndContinue, hasActiveSession, abortTransaction, isAborting } = walletSend;
   const { getSessionHistory } = useSessionRecovery();
   const { price: solPrice } = useSolPrice();
   
-  // Wallet assets (left panel)
-  const [walletAssets, setWalletAssets] = useState<WalletAsset[]>([]);
-  const [walletTotalUsd, setWalletTotalUsd] = useState<number | null>(null);
-  const [walletAssetsLoading, setWalletAssetsLoading] = useState(false);
+  // Sessions (left panel)
+  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  
+  // SOL balance for wallet card
+  const [solBalance, setSolBalance] = useState<number>(0);
   
   // Max transaction limit in USD (prod)
   const MAX_USD = 1000;
@@ -110,6 +105,28 @@ export default function ProdPage() {
   // Recovery state
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
   const [recovering, setRecovering] = useState(false);
+  
+  // Abort state
+  const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+  const [abortStatus, setAbortStatus] = useState<{ success: boolean; recovered: number; errors: string[] } | null>(null);
+  
+  // Handle abort confirmation
+  const handleAbortConfirm = async () => {
+    setShowAbortConfirm(false);
+    try {
+      const result = await abortTransaction();
+      setAbortStatus(result);
+      if (result.success) {
+        alert(`Transaction aborted successfully. Recovered ${(result.recovered / 1e9).toFixed(6)} SOL.`);
+      } else {
+        alert(`Transaction aborted with some errors. Recovered ${(result.recovered / 1e9).toFixed(6)} SOL.\nErrors: ${result.errors.join('\n')}`);
+      }
+    } catch (err: any) {
+      alert(`Failed to abort transaction: ${err.message}`);
+    } finally {
+      setAbortStatus(null);
+    }
+  };
   
   // Invite code state
   const [inviteCode, setInviteCode] = useState('');
@@ -142,112 +159,46 @@ export default function ProdPage() {
     connectionRef.current = new Connection(getSolanaRpc('mainnet'), 'confirmed');
   }, []);
 
-  // Fetch wallet balances for left panel
+  // Fetch sessions and SOL balance for left panel
   useEffect(() => {
-    const fetchAssets = async () => {
+    const fetchData = async () => {
       if (!connected || !publicKey || !connectionRef.current) {
-        setWalletAssets([]);
-        setWalletTotalUsd(null);
+        setSessions([]);
+        setSolBalance(0);
         return;
       }
 
-      setWalletAssetsLoading(true);
+      setSessionsLoading(true);
 
       try {
         const connection = connectionRef.current;
-        const owner = publicKey;
+        const walletAddress = publicKey.toBase58();
 
-        // SOL balance
-        const solLamports = await connection.getBalance(owner);
+        // Fetch SOL balance
+        const solLamports = await connection.getBalance(publicKey);
         const solAmount = solLamports / LAMPORTS_PER_SOL;
-
-        const assets: WalletAsset[] = [];
-        let totalUsd = 0;
-
-        if (solAmount > 0) {
-          const solUsd = solPrice ? solAmount * solPrice : undefined;
-          if (solUsd) totalUsd += solUsd;
-          assets.push({
-            symbol: 'SOL',
-            amount: solAmount,
-            usdValue: solUsd,
-          });
-        }
-
-        // SPL tokens (USDC, USDT, WETH) - approximate pricing (USDC/USDT ~= $1)
-        const tokenConfigs: {
-          symbol: string;
-          mint: PublicKey;
-          usdPeg?: number;
-        }[] = [
-          {
-            symbol: 'USDC',
-            mint: new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
-            usdPeg: 1,
-          },
-          {
-            symbol: 'USDT',
-            mint: new PublicKey('Es9vMFrzaCERmJfrF7vCwTbk7C1hF9TZLx3hGk3gP4f3'),
-            usdPeg: 1,
-          },
-          {
-            symbol: 'WETH',
-            mint: new PublicKey('7vfCXTUXx5WJV5JADk17DUJ4ksgau7utjQp5zj7MT7iJ'),
-          },
-        ];
-
-        for (const cfg of tokenConfigs) {
-          try {
-            const resp = await connection.getParsedTokenAccountsByOwner(owner, {
-              mint: cfg.mint,
-            });
-
-            let uiAmount = 0;
-            for (const { account } of resp.value) {
-              const data: any = account.data;
-              const amtStr =
-                data?.parsed?.info?.tokenAmount?.uiAmountString ??
-                data?.parsed?.info?.tokenAmount?.uiAmount ??
-                '0';
-              const parsed = parseFloat(amtStr);
-              if (!Number.isNaN(parsed)) {
-                uiAmount += parsed;
-              }
-            }
-
-            if (uiAmount > 0) {
-              let usdValue: number | undefined;
-              if (cfg.usdPeg) {
-                usdValue = uiAmount * cfg.usdPeg;
-              }
-              if (usdValue) {
-                totalUsd += usdValue;
-              }
-              assets.push({
-                symbol: cfg.symbol,
-                amount: uiAmount,
-                usdValue,
-              });
-            }
+        setSolBalance(solAmount);
+        
+        // Fetch sessions
+        const sessionHistory = await getSessionHistory(walletAddress, { limit: 10 });
+        // Sort by created_at descending (most recent first)
+        sessionHistory.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setSessions(sessionHistory);
           } catch (err) {
-            console.error(`Failed to fetch ${cfg.symbol} balance:`, err);
-          }
-        }
-
-        setWalletAssets(assets);
-        setWalletTotalUsd(totalUsd || null);
-      } catch (err) {
-        console.error('Error fetching wallet assets:', err);
+        console.error('Error fetching data:', err);
+        setSessions([]);
+        setSolBalance(0);
       } finally {
-        setWalletAssetsLoading(false);
+        setSessionsLoading(false);
       }
     };
 
-    fetchAssets();
+    fetchData();
 
-    const interval = setInterval(fetchAssets, 30000);
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [connected, publicKey, solPrice]);
+  }, [connected, publicKey, getSessionHistory]);
 
   // Check if wallet already has a validated invite code
   useEffect(() => {
@@ -831,13 +782,14 @@ export default function ProdPage() {
     }
   })();
   
+  const walletAddress = publicKey?.toBase58();
+  
   return (
     <main
       style={{
         minHeight: '100vh',
         padding: '24px',
-        background:
-          'radial-gradient(circle at top left, #f9fafb 0, #e5e7eb 35%, #e2e8f0 70%, #cbd5e1 100%)',
+        background: '#FFFFFF',
       }}
     >
       {/* Wallet Connect Screen - Show if not connected */}
@@ -994,7 +946,7 @@ export default function ProdPage() {
                 borderRadius: 24,
                 background: 'rgba(255,255,255,0.82)',
                 border: '1px solid rgba(148,163,184,0.45)',
-                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+                boxShadow: '0 4px 12px rgba(15,23,42,0.08)',
                 backdropFilter: 'blur(24px) saturate(180%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(180%)',
           display: 'flex',
@@ -1090,154 +1042,535 @@ export default function ProdPage() {
               flexWrap: 'wrap',
             }}
           >
-            {/* Left Panel: Wallet + Assets */}
+            {/* Left Panel: Wallet + Sessions */}
             <section
               style={{
                 flex: '0 0 300px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 16,
-                borderRadius: 24,
-                background: 'rgba(255,255,255,0.82)',
-                border: '1px solid rgba(148,163,184,0.45)',
-                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
-                backdropFilter: 'blur(24px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-                padding: 20,
+                alignItems: 'flex-start',
+                gap: 25,
               }}
             >
+              {/* Wallet Summary Card */}
               <div
                 style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-                  marginBottom: 12,
+                  position: 'relative',
+                  width: 300,
+                  height: 207,
+                  borderRadius: 20,
+                  background: 'rgba(255, 255, 255, 0.20)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  boxShadow: `
+                    inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                    inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                    inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                    0 4px 12px rgba(0, 0, 0, 0.05)
+                  `,
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                  overflow: 'hidden',
                 }}
               >
-                <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>
-                  Wallet Balance
-                </span>
-                <WalletMultiButton
-              style={{
-                    background: '#111827',
-                    borderRadius: 999,
-                    height: 32,
-                    fontSize: 11,
-                    paddingInline: 14,
+                {/* Gradient overlay for glassy effect */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(135deg, rgba(52, 52, 52, 0.05) 0%, rgba(207, 207, 207, 0.1) 50%, rgba(255, 255, 255, 0.4) 100%)',
+                    pointerEvents: 'none',
+                    borderRadius: 20,
                   }}
                 />
-              </div>
-              <div style={{ marginBottom: 8 }}>
+                {/* Top section: icon + label */}
                 <div
                   style={{
-                    fontSize: 26,
-                    fontWeight: 700,
-                    color: '#0f172a',
-                    letterSpacing: '-0.03em',
+                    position: 'absolute',
+                    left: 20,
+                    top: 20,
+            display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    width: 195,
+                    height: 66,
+                    overflow: 'hidden',
                   }}
                 >
-                  {walletTotalUsd !== null ? `$${walletTotalUsd.toFixed(2)}` : '—'}
-          </div>
-                {connected && publicKey && (
                   <div
                     style={{
-                      marginTop: 4,
-                      fontSize: 11,
-                      color: '#9ca3af',
-                      fontFamily: 'monospace',
+                      display: 'flex',
+                      flexDirection: 'row',
+            alignItems: 'center',
+                      gap: 7,
+                      width: 105,
+                      height: 20,
                     }}
                   >
-                    {publicKey.toBase58().slice(0, 6)}...{publicKey.toBase58().slice(-6)}
-            </div>
-                )}
-            </div>
-              <div
-                    style={{
-                  marginTop: 10,
-                  paddingTop: 10,
-                  borderTop: '1px dashed rgba(148,163,184,0.6)',
-                  fontSize: 11,
-                  color: '#9ca3af',
-                }}
-              >
-                {walletAssetsLoading
-                  ? 'Loading assets...'
-                  : walletAssets.length === 0
-                  ? 'No assets detected for this wallet yet.'
-                  : 'Assets'}
-              </div>
-              {walletAssets.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                    maxHeight: 220,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {walletAssets.map((asset) => (
+                    <img
+                      src="/wallet.svg"
+                      alt="Wallet"
+              style={{
+                        width: 20,
+                        height: 20,
+                        display: 'block',
+                        opacity: 0.5,
+                      }}
+                    />
                     <div
-                      key={asset.symbol}
                       style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 10px',
-                        borderRadius: 12,
-                        background: 'rgba(255,255,255,0.9)',
-                        border: '1px solid rgba(226,232,240,0.9)',
+                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontStyle: 'normal',
+                        fontWeight: 300,
+                        fontSize: 13,
+                        lineHeight: '16px',
+                        color: '#343434',
+                        opacity: 0.5,
+                        height: 16,
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: '#0f172a',
-                          }}
-                        >
-                          {asset.symbol}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: '#6b7280',
-                            marginTop: 2,
-                          }}
-                        >
-                          {asset.amount.toFixed(4)} {asset.symbol}
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: '#111827',
-                        }}
-                      >
-                        {asset.usdValue !== undefined
-                          ? `$${asset.usdValue.toFixed(2)}`
-                          : '—'}
-                    </div>
-                    </div>
-                  ))}
+                      Wallet Balance
+              </div>
+                  </div>
+
+                  {/* Balance */}
+                <div
+                  style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 500,
+                      fontSize: 30,
+                      lineHeight: '36px',
+                      color: '#343434',
+                      width: 195,
+                      height: 36,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {solPrice && solBalance > 0
+                      ? `$${(solBalance * solPrice).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
+                      : '$0.00'}
+          </div>
                 </div>
-              )}
+
+                {/* Three dots menu */}
+                <button
+                  type="button"
+                  aria-label="More options"
+                  style={{
+                    position: 'absolute',
+                    right: 10.4,
+                    top: 20,
+                    width: 11.2,
+                    height: 1.6,
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 3.2,
+                    border: 'none',
+                    background: 'transparent',
+                    padding: 0,
+                    cursor: 'pointer',
+                    transform: 'rotate(90deg)',
+                  }}
+                >
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: 1.6,
+                        height: 1.6,
+                        border: '1.2px solid #CFCFCF',
+                        borderRadius: '50%',
+                        transform: 'rotate(90deg)',
+                      }}
+                    />
+                  ))}
+                </button>
+
+                {/* Address row */}
+                {connected && walletAddress && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 20,
+                      top: 106,
+                      width: 155.22,
+                      height: 16,
+                      display: 'flex',
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      gap: 5,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontStyle: 'normal',
+                        fontWeight: 400,
+                        fontSize: 13,
+                        lineHeight: '16px',
+                        color: '#343434',
+                        opacity: 0.5,
+                        width: 137,
+                        height: 16,
+                      }}
+                    >
+                      {`${walletAddress.slice(0, 7)}...${walletAddress.slice(-9)}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!walletAddress) return;
+                        try {
+                          navigator.clipboard?.writeText(walletAddress);
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      style={{
+                        width: 13.22,
+                        height: 12.44,
+                        border: 'none',
+                        background: 'transparent',
+                        padding: 0,
+                        cursor: 'pointer',
+                        opacity: 0.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      aria-label="Copy address"
+                    >
+                      <img
+                        src="/copy.svg"
+                        alt="Copy"
+                        style={{ width: 13.22, height: 12.44, display: 'block' }}
+                      />
+                    </button>
+            </div>
+                )}
+
+                {/* Disconnect button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!connected) return;
+                    disconnect?.().catch(() => {});
+                  }}
+                  disabled={!connected}
+                  style={{
+                    position: 'absolute',
+                    left: 20,
+                    bottom: 20,
+                    width: 95,
+                    height: 42,
+                    padding: '12px 16px',
+                    display: 'flex',
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    boxShadow: '0px 3.2px 9.6px rgba(0, 0, 0, 0.04)',
+                    borderRadius: 39.2,
+                    border: 'none',
+                    cursor: connected ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 500,
+                      fontSize: 12.8,
+                      lineHeight: '15px',
+                      color: '#343434',
+                      width: 63,
+                      height: 15,
+                    }}
+                  >
+                    Disconnect
+                  </span>
+                </button>
+
+                {/* Logo image */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 250,
+                    top: 157,
+                    width: 30,
+                    height: 30,
+                    borderRadius: 47,
+                    backgroundImage: 'url(/image.png)',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }}
+                />
+            </div>
+
+              {/* Sessions Card */}
               <div
-                style={{
-                  marginTop: 16,
-                  padding: 14,
-                  borderRadius: 18,
-                  background: 'rgba(248,250,252,0.9)',
-                  border: '1px dashed rgba(148,163,184,0.6)',
-                  fontSize: 11,
-                  color: '#6b7280',
-                  textAlign: 'center',
+                    style={{
+                  position: 'relative',
+                  width: 300,
+                  height: 348,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  padding: '25px 20px',
+                  gap: 25,
+                  background: 'linear-gradient(135deg, rgba(245, 245, 245, 0.2) 0%, rgba(255, 255, 255, 0.7) 100%)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  boxShadow: `
+                    inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                    inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                    inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                    0 4px 12px rgba(0, 0, 0, 0.05)
+                  `,
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                  borderRadius: 20,
+                  overflow: 'hidden',
                 }}
               >
-                More features like cards and analytics coming soon.
+                {/* Gradient overlay for glassy effect */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(135deg, rgba(230, 230, 230, 0.1) 0%, rgba(255, 255, 255, 0.6) 100%)',
+                    pointerEvents: 'none',
+                    borderRadius: 20,
+                  }}
+                />
+                {/* Sessions Header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 7,
+                    width: 71,
+                    height: 19,
+                  }}
+                >
+                  <img
+                    src="/assets.svg"
+                    alt="Sessions"
+                    style={{
+                      width: 19,
+                      height: 19,
+                      display: 'block',
+                    }}
+                  />
+                  <div
+                    style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 300,
+                      fontSize: 16,
+                      lineHeight: '19px',
+                      color: '#000000',
+                      opacity: 0.5,
+                      width: 45,
+                      height: 19,
+                    }}
+                  >
+                    Sessions
+              </div>
+                </div>
+
+                {/* Sessions List */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 30,
+                    width: 260,
+                    height: 254,
+                  }}
+                >
+                  {sessions.length > 0 ? (
+                    sessions.map((session) => {
+                      const statusColors: Record<string, string> = {
+                        completed: '#29CC6A',
+                        in_progress: '#3b82f6',
+                        pending: '#f59e0b',
+                        failed: '#ef4444',
+                        aborted: '#9ca3af',
+                      };
+                      
+                      const date = new Date(session.created_at);
+                      const params = session.transaction_params;
+                      
+                      return (
+                        <div
+                          key={session.id}
+                      style={{
+                        display: 'flex',
+                            flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                            width: 260,
+                            height: 41,
+                            cursor: (session.status === 'pending' || session.status === 'in_progress') ? 'pointer' : 'default',
+                          }}
+                          onClick={() => {
+                            if (session.status === 'pending' || session.status === 'in_progress') {
+                              handleRecoverSession(session);
+                            }
+                          }}
+                        >
+                          {/* Left: Session Info */}
+                        <div
+                          style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: 3,
+                              flex: 1,
+                              minWidth: 0,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontStyle: 'normal',
+                                fontWeight: 500,
+                                fontSize: 14,
+                                lineHeight: '17px',
+                                color: '#343434',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                width: '100%',
+                              }}
+                            >
+                              {date.toLocaleDateString()}
+                        </div>
+                        <div
+                          style={{
+                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontStyle: 'normal',
+                                fontWeight: 400,
+                                fontSize: 12,
+                                lineHeight: '14px',
+                                color: '#747474',
+                              }}
+                            >
+                              {formatSolAmount(params.amount, solPrice, 4)}
+                        </div>
+                      </div>
+
+                          {/* Right: Status */}
+                      <div
+                        style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-end',
+                              gap: 3,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontStyle: 'normal',
+                                fontWeight: 500,
+                                fontSize: 13,
+                                lineHeight: '16px',
+                                textAlign: 'right',
+                                color: statusColors[session.status] || '#9D9D9D',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {session.status}
+                            </div>
+                            <div
+                              style={{
+                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontStyle: 'normal',
+                                fontWeight: 400,
+                          fontSize: 12,
+                                lineHeight: '14px',
+                                color: '#747474',
+                        }}
+                      >
+                              Step {session.current_step}/13
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div
+                      style={{
+                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontStyle: 'normal',
+                        fontWeight: 400,
+                        fontSize: 12,
+                        lineHeight: '14px',
+                        color: '#747474',
+                      }}
+                    >
+                      {sessionsLoading ? 'Loading sessions...' : 'No sessions found'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Third Card - Banner */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: 300,
+                  height: 207,
+                  borderRadius: 20,
+                  background: 'linear-gradient(135deg, rgba(245, 245, 245, 0.2) 0%, rgba(255, 255, 255, 0.7) 100%)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  boxShadow: `
+                    inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                    inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                    inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                    0 4px 12px rgba(0, 0, 0, 0.05)
+                  `,
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Gradient overlay for glassy effect */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(135deg, rgba(230, 230, 230, 0.1) 0%, rgba(255, 255, 255, 0.6) 100%)',
+                    pointerEvents: 'none',
+                    borderRadius: 20,
+                  }}
+                />
                     </div>
             </section>
 
@@ -1249,7 +1582,7 @@ export default function ProdPage() {
                 borderRadius: 24,
                 background: 'rgba(255,255,255,0.94)',
                 border: '1px solid rgba(148,163,184,0.45)',
-                boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
+                boxShadow: '0 4px 12px rgba(15,23,42,0.08)',
                 backdropFilter: 'blur(24px) saturate(180%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(180%)',
                 padding: 24,
@@ -1808,6 +2141,29 @@ export default function ProdPage() {
               </span>
             </div>
             <PrivacyProgressBar steps={steps} />
+            {/* Mission Abort Button */}
+            {steps.some(s => s.status === 'running') && (
+              <button
+                type="button"
+                onClick={() => setShowAbortConfirm(true)}
+                disabled={isAborting}
+                style={{
+                  marginTop: 12,
+                  padding: '10px 20px',
+                  background: isAborting ? '#9ca3af' : '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: isAborting ? 'not-allowed' : 'pointer',
+                  opacity: isAborting ? 0.6 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {isAborting ? 'Aborting...' : 'Mission Abort'}
+              </button>
+            )}
           </div>
         ) : (
           <div
@@ -1977,6 +2333,90 @@ export default function ProdPage() {
             onPoolsChange={setSelectedPools}
             availablePools={pools}
           />
+        </div>
+      )}
+      
+      {/* Abort Confirmation Dialog */}
+      {showAbortConfirm && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowAbortConfirm(false)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '500px',
+              width: '90%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p
+              style={{
+                margin: '0 0 24px 0',
+                fontSize: '16px',
+                color: '#111827',
+                lineHeight: '1.5',
+              }}
+            >
+              Are you sure you want to abort this transaction?
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowAbortConfirm(false)}
+                style={{
+                  padding: '10px 20px',
+                  background: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAbortConfirm}
+                disabled={isAborting}
+                style={{
+                  padding: '10px 20px',
+                  background: isAborting ? '#9ca3af' : '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: isAborting ? 'not-allowed' : 'pointer',
+                  opacity: isAborting ? 0.6 : 1,
+                }}
+              >
+                {isAborting ? 'Aborting...' : 'Confirm Abort'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { 
   Connection, 
@@ -107,6 +107,8 @@ export function useWalletPrivateSend() {
   const [burnerWallets, setBurnerWallets] = useState<EOABurnerWalletInfo[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [isAborting, setIsAborting] = useState(false);
+  const abortCancelledRef = useRef(false);
 
   const updateStep = useCallback((stepId: number, status: 'pending' | 'running' | 'completed' | 'error', message?: string) => {
     setSteps(prev => prev.map(step => 
@@ -200,6 +202,16 @@ export function useWalletPrivateSend() {
     if (!connection) {
       throw new Error('Connection not available');
     }
+
+    // Reset abort flag at start
+    abortCancelledRef.current = false;
+    
+    // Helper to check if aborted
+    const checkAborted = () => {
+      if (abortCancelledRef.current) {
+        throw new Error('Transaction aborted by user');
+      }
+    };
 
     // Initialize steps
     setSteps(STEPS.map(s => ({ ...s, status: 'pending' as const })));
@@ -457,8 +469,7 @@ export function useWalletPrivateSend() {
         throw new Error(`Pool ${poolId} not found. Available pools: ${poolRegistry.getPoolIds().join(', ')}`);
       }
       
-      // For now, Privacy Cash is the only pool with full SDK support
-      // ShadowPay uses API, so we'll need different handling
+      // Privacy Cash is the only supported pool
       if (poolId !== 'privacy-cash') {
         throw new Error(`Pool ${poolId} is not yet supported for wallet transactions. Please use privacy-cash.`);
       }
@@ -501,6 +512,7 @@ export function useWalletPrivateSend() {
       
       try {
         for (let i = 0; i < numChunks; i++) {
+          checkAborted();
           let chunkAmount = chunkAmounts[i];
           
           updateStep(4, 'running', `Depositing chunk ${i + 1}/${numChunks}...`);
@@ -682,6 +694,7 @@ export function useWalletPrivateSend() {
       // Use same chunk amounts as deposited
       try {
         for (let i = 0; i < numChunks; i++) {
+          checkAborted();
           const burnerKeypair = burnerKeypairs[i];
           const withdrawAmount = chunkAmounts[i];
           
@@ -748,6 +761,7 @@ export function useWalletPrivateSend() {
       
       try {
         for (let i = 0; i < numChunks; i++) {
+          checkAborted();
           const burnerKeypair = burnerKeypairs[i];
           
           updateStep(10, 'running', `Checking burner ${i + 1} balance...`);
@@ -1201,12 +1215,223 @@ export function useWalletPrivateSend() {
     setResult(null);
     setBurnerWallets([]);
     setRecoveryMode(false);
+    abortCancelledRef.current = false;
   }, [currentSessionId, deleteSession]);
+
+  /**
+   * Recover all funds from privacy pools and burner wallets
+   */
+  const recoverAllFunds = useCallback(async (): Promise<{ recovered: number; errors: string[] }> => {
+    if (!connected || !publicKey || !connection) {
+      throw new Error('Wallet not connected');
+    }
+
+    const errors: string[] = [];
+    let totalRecovered = 0;
+
+    try {
+      // Import required modules
+      const { getUtxos, withdraw } = await import('privacycash/utils');
+      // @ts-ignore
+      const { WasmFactory } = await import('@lightprotocol/hasher.rs');
+      const { PrivacyCash } = await import('privacycash');
+      const { SystemProgram, Transaction } = await import('@solana/web3.js');
+
+      const lightWasm = await WasmFactory.getInstance();
+      const sourceWallet = publicKey;
+
+      // Step 1: Claim from privacy pools for each burner
+      console.log('[Abort] Claiming funds from privacy pools...');
+      
+      for (const burner of burnerWallets) {
+        try {
+          // Reconstruct burner keypair
+          const burnerKeypair = Keypair.fromSecretKey(bs58.decode(burner.privateKey));
+          const burnerPubkey = burnerKeypair.publicKey;
+
+          // Create PrivacyCash client for burner
+          const burnerClient = new PrivacyCash({
+            RPC_url: getRpcUrl(),
+            owner: burnerKeypair,
+            enableDebug: false,
+          }) as any;
+
+          // Get UTXOs for this burner
+          const utxos = await getUtxos({
+            publicKey: burnerPubkey,
+            connection: connection,
+            encryptionService: burnerClient.encryptionService,
+            storage: getBrowserStorage(),
+          });
+
+          if (utxos.length === 0) {
+            console.log(`[Abort] No UTXOs found for burner ${burner.address.slice(0, 8)}...`);
+            continue;
+          }
+
+          // Calculate total withdrawable amount
+          const totalUtxoBalance = utxos.reduce((sum: number, utxo: any) => {
+            return sum + parseInt(utxo.amount.toString());
+          }, 0);
+
+          if (totalUtxoBalance <= 0) {
+            console.log(`[Abort] No balance in UTXOs for burner ${burner.address.slice(0, 8)}...`);
+            continue;
+          }
+
+          console.log(`[Abort] Withdrawing ${(totalUtxoBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL from burner ${burner.address.slice(0, 8)}...`);
+
+          // Withdraw all funds to burner's public key
+          const withdrawResult = await withdraw({
+            lightWasm,
+            amount_in_lamports: totalUtxoBalance,
+            connection: connection,
+            encryptionService: burnerClient.encryptionService,
+            publicKey: burnerPubkey,
+            recipient: burnerPubkey, // Withdraw to burner itself
+            keyBasePath: '/circuit2/transaction2',
+            storage: getBrowserStorage(),
+          });
+
+          if (withdrawResult && withdrawResult.tx) {
+            // Wait for confirmation
+            await connection.confirmTransaction(withdrawResult.tx, 'confirmed');
+            console.log(`[Abort] Successfully withdrew from burner ${burner.address.slice(0, 8)}...`);
+          }
+        } catch (err: any) {
+          const errorMsg = `Failed to claim from burner ${burner.address.slice(0, 8)}...: ${err.message}`;
+          console.error(`[Abort] ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      }
+
+      // Step 2: Send from all burners to source wallet
+      console.log('[Abort] Returning funds from burners to source wallet...');
+      
+      // Wait a bit for withdrawals to settle
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      for (const burner of burnerWallets) {
+        try {
+          const burnerKeypair = Keypair.fromSecretKey(bs58.decode(burner.privateKey));
+          const burnerPubkey = burnerKeypair.publicKey;
+
+          // Get burner's on-chain balance
+          const burnerBalance = await connection.getBalance(burnerPubkey);
+
+          if (burnerBalance <= 0) {
+            console.log(`[Abort] No balance for burner ${burner.address.slice(0, 8)}...`);
+            continue;
+          }
+
+          // Estimate fee for simple transfer
+          const feeEstimate = 5000; // Conservative estimate
+          const transferableAmount = Math.max(0, burnerBalance - feeEstimate);
+
+          if (transferableAmount <= 0) {
+            console.log(`[Abort] Insufficient balance for transfer from burner ${burner.address.slice(0, 8)}...`);
+            continue;
+          }
+
+          console.log(`[Abort] Transferring ${(transferableAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL from burner ${burner.address.slice(0, 8)}... to source`);
+
+          // Create simple transfer transaction
+          const { blockhash } = await connection.getLatestBlockhash('confirmed');
+          const transaction = new Transaction().add(
+            SystemProgram.transfer({
+              fromPubkey: burnerPubkey,
+              toPubkey: sourceWallet,
+              lamports: transferableAmount,
+            })
+          );
+          transaction.recentBlockhash = blockhash;
+          transaction.feePayer = burnerPubkey;
+
+          // Sign and send
+          transaction.sign(burnerKeypair);
+          const signature = await connection.sendRawTransaction(transaction.serialize());
+          await connection.confirmTransaction(signature, 'confirmed');
+
+          totalRecovered += transferableAmount;
+          console.log(`[Abort] Successfully transferred from burner ${burner.address.slice(0, 8)}...`);
+        } catch (err: any) {
+          const errorMsg = `Failed to transfer from burner ${burner.address.slice(0, 8)}...: ${err.message}`;
+          console.error(`[Abort] ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      }
+
+      console.log(`[Abort] Recovery complete. Total recovered: ${(totalRecovered / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+    } catch (err: any) {
+      errors.push(`Recovery process failed: ${err.message}`);
+      console.error('[Abort] Recovery error:', err);
+    }
+
+    return {
+      recovered: totalRecovered,
+      errors,
+    };
+  }, [connected, publicKey, connection, burnerWallets]);
+
+  /**
+   * Abort transaction and recover all funds
+   */
+  const abortTransaction = useCallback(async (): Promise<{ success: boolean; recovered: number; errors: string[] }> => {
+    if (!connected || !publicKey) {
+      throw new Error('Wallet not connected');
+    }
+
+    setIsAborting(true);
+    abortCancelledRef.current = true;
+    setLoading(false);
+
+    const errors: string[] = [];
+    let totalRecovered = 0;
+
+    try {
+      // Mark all running steps as error
+      setSteps(prev => prev.map(step => 
+        step.status === 'running' ? { ...step, status: 'error' as const, message: 'Aborted by user' } : step
+      ));
+
+      // Update session status if exists
+      if (currentSessionId) {
+        try {
+          await updateSession(currentSessionId, {
+            status: 'aborted',
+          });
+        } catch (err) {
+          console.error('Failed to update session status:', err);
+        }
+      }
+
+      // Recover all funds
+      const recoveryResult = await recoverAllFunds();
+      totalRecovered = recoveryResult.recovered;
+      errors.push(...recoveryResult.errors);
+
+      return {
+        success: errors.length === 0,
+        recovered: totalRecovered,
+        errors,
+      };
+    } catch (err: any) {
+      errors.push(`Abort failed: ${err.message}`);
+      return {
+        success: false,
+        recovered: totalRecovered,
+        errors,
+      };
+    } finally {
+      setIsAborting(false);
+    }
+  }, [connected, publicKey, currentSessionId, updateSession, recoverAllFunds]);
 
   return {
     execute,
     recoverAndContinue,
     reset,
+    abortTransaction,
     steps,
     loading,
     error,
@@ -1216,5 +1441,6 @@ export function useWalletPrivateSend() {
     walletAddress: publicKey?.toBase58(),
     hasActiveSession: currentSessionId !== null,
     recoveryMode,
+    isAborting,
   };
 }

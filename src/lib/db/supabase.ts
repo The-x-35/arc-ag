@@ -5,7 +5,7 @@ export interface TransactionSession {
   wallet_address: string;
   session_word: string;
   current_step: number;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'aborted';
   transaction_params: {
     destination: string;
     amount: number;
