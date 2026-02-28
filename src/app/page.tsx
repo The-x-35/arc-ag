@@ -16,6 +16,7 @@ import PrivacyProgressBar from '@/components/PrivacyProgressBar';
 import PrivacySettingsModal from '@/components/PrivacySettingsModal';
 import ProdMenu from '@/components/ProdMenu';
 import { calculatePrivacyScore, formatPrivacyScore, PrivacyScoreResult } from '@/lib/privacy/privacy-score';
+import { isValidSolanaAddress } from '@/lib/swig/utils';
 
 
 // Ensure pools are registered
@@ -37,11 +38,11 @@ export default function ProdPage() {
 
   // Derive number of parts (chunks) from delayMinutes internally
   const chunks = (() => {
-    if (delayMinutes < 10) return 2;
-    if (delayMinutes < 60) return 4;
-    if (delayMinutes < 120) return 6;
+    if (delayMinutes < 10) return 2;      // 5 Min → 2 parts
+    if (delayMinutes < 30) return 4;      // 15 Min → 4 parts
+    if (delayMinutes < 60) return 6;      // 30 Min → 6 parts
     if (delayMinutes < 180) return 8;
-    return 10;
+    return 10;                            // 240 Min (4 Hrs) → 10 parts
   })();
   
   // Settings modal state
@@ -645,10 +646,10 @@ export default function ProdPage() {
         setDestination(result.params.destination);
         setAmount(result.params.amount.toString());
         const sliderValue = Math.round(((result.params.numChunks - 2) / 8) * 100);
-        setPrivacySliderValue(sliderValue);
+      setPrivacySliderValue(sliderValue);
         if (result.params.selectedPools) {
           setSelectedPools(result.params.selectedPools);
-        }
+      }
         // Now execute the transaction with the decrypted params and session
         await walletSend.execute(result.params, result.session);
       }
@@ -1587,94 +1588,206 @@ export default function ProdPage() {
               style={{
                 flex: 1,
                 minWidth: 0,
-                borderRadius: 24,
-                background: 'rgba(255,255,255,0.94)',
-                border: '1px solid rgba(148,163,184,0.45)',
-                boxShadow: '0 4px 12px rgba(15,23,42,0.08)',
-                backdropFilter: 'blur(24px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-                padding: 24,
+                position: 'relative',
               }}
             >
-              {/* Destination */}
-              <div style={{ marginBottom: '20px' }}>
-          <label style={{ color: '#000', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Destination Address
-          </label>
-          <input
-            type="text"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="Solana wallet address"
-            disabled={loading}
-            required
+              {/* Glassmorphism box container like left panel */}
+              <div
             style={{
+                  position: 'relative',
               width: '100%',
-              padding: '12px 16px',
-              background: '#fff',
-              border: '1px solid #ddd',
-              borderRadius: '8px',
-              color: '#000',
-              fontSize: '14px'
-            }}
-          />
-        </div>
-        
-        {/* Amount */}
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ color: '#000', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Amount
-          </label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {/* SOL / USD switch on the left */}
-            <div
-              style={{
-                display: 'flex',
-                gap: '4px',
-                background: '#fff',
-                padding: '2px',
-                borderRadius: '999px',
-                border: '1px solid #ddd'
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => handleAmountUnitChange('SOL')}
-                        style={{
-                  padding: '4px 8px',
-                  borderRadius: '999px',
-                          border: 'none',
-                  fontSize: '11px',
-                          cursor: 'pointer',
-                  background: amountUnit === 'SOL' ? '#000' : 'transparent',
-                  color: amountUnit === 'SOL' ? '#fff' : '#666',
-                  minWidth: '36px'
+                  borderRadius: 20,
+                  background: 'rgba(255, 255, 255, 0.20)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  boxShadow: `
+                    inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                    inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                    inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                    0 4px 12px rgba(0, 0, 0, 0.05)
+                  `,
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                  overflow: 'hidden',
                 }}
               >
-                SOL
+                {/* Gradient overlay for glassy effect */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(135deg, rgba(52, 52, 52, 0.05) 0%, rgba(207, 207, 207, 0.1) 50%, rgba(255, 255, 255, 0.4) 100%)',
+                    pointerEvents: 'none',
+                    borderRadius: 20,
+                  }}
+                />
+                
+                {/* Inner content */}
+            <div
+              style={{
+                    position: 'relative',
+                    zIndex: 1,
+                    padding: '35px',
+                display: 'flex',
+                    flexDirection: 'column',
+                    gap: '15px'
+                  }}
+                >
+                {/* Send Header */}
+                <h2 style={{
+                  fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                  fontStyle: 'normal',
+                  fontWeight: 400,
+                  fontSize: '32px',
+                  lineHeight: '38px',
+                  color: '#000000',
+                  margin: 0,
+                  marginBottom: '15px'
+                }}>
+                  Send
+                </h2>
+
+                {/* Enter Amount Section */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', margin: 0, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '164px', height: '19px', margin: 0 }}>
+                    <img src="/assets.svg" alt="Amount" style={{ width: '19px', height: '19px', display: 'block', flexShrink: 0, margin: 0 }} />
+                    <label style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 400,
+                      fontSize: '16px',
+                      lineHeight: '19px',
+                      color: '#343434',
+                      opacity: 0.5,
+                      margin: 0,
+                      padding: 0
+                    }}>
+                      Enter Amount
+                    </label>
+                  </div>
+                  
+                  <div style={{
+                    boxSizing: 'border-box',
+                display: 'flex',
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '15px 25px',
+                    width: '100%',
+                    border: '1px solid #E8E8E8',
+                    borderRadius: '12px',
+                    background: '#fff'
+                  }}>
+                    {/* Left side: max/half buttons and amount */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '181px' }}>
+                      {/* Max/Half buttons */}
+                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px', width: '181px', height: '30px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                            onClick={() => {
+                              if (solBalance > 0) {
+                                const maxAmount = maxSolAmount ? Math.min(solBalance, maxSolAmount) : solBalance;
+                                if (amountUnit === 'USD' && solPrice) {
+                                  setAmount((maxAmount * solPrice).toString());
+                                } else {
+                                  setAmount(maxAmount.toString());
+                                }
+                              }
+                            }}
+                            disabled={loading || solBalance <= 0}
+                        style={{
+                              display: 'flex',
+                              flexDirection: 'row',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              padding: '8.64px 11.52px',
+                              gap: '5.76px',
+                              width: '40px',
+                              height: '30px',
+                              background: 'rgba(255, 255, 255, 0.18)',
+                              boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03)',
+                              borderRadius: '10px',
+                          border: 'none',
+                              cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
+                              opacity: loading || solBalance <= 0 ? 0.5 : 1
+                            }}
+                          >
+                            <span style={{
+                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontStyle: 'normal',
+                              fontWeight: 500,
+                              fontSize: '10px',
+                              lineHeight: '12px',
+                              textAlign: 'center',
+                              color: '#343434'
+                            }}>
+                              max
+                            </span>
               </button>
               <button
                 type="button"
-                onClick={() => handleAmountUnitChange('USD')}
-                disabled={!solPrice}
+                            onClick={() => {
+                              if (solBalance > 0) {
+                                const half = solBalance / 2;
+                                const maxAmount = maxSolAmount ? Math.min(half, maxSolAmount) : half;
+                                if (amountUnit === 'USD' && solPrice) {
+                                  setAmount((maxAmount * solPrice).toString());
+                                } else {
+                                  setAmount(maxAmount.toString());
+                                }
+                              }
+                            }}
+                            disabled={loading || solBalance <= 0}
                 style={{
-                  padding: '4px 8px',
-                  borderRadius: '999px',
+                              display: 'flex',
+                              flexDirection: 'row',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              padding: '8.64px 11.52px',
+                              gap: '5.76px',
+                              width: '40px',
+                              height: '30px',
+                              background: 'rgba(255, 255, 255, 0.18)',
+                              boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03)',
+                              borderRadius: '10px',
                   border: 'none',
-                          fontSize: '11px',
-                  cursor: !solPrice ? 'not-allowed' : 'pointer',
-                  background: amountUnit === 'USD' ? '#000' : 'transparent',
-                  color: !solPrice ? '#ccc' : amountUnit === 'USD' ? '#fff' : '#666',
-                  minWidth: '36px',
-                  opacity: !solPrice ? 0.5 : 1
-                }}
-              >
-                $
+                              cursor: loading || solBalance <= 0 ? 'not-allowed' : 'pointer',
+                              opacity: loading || solBalance <= 0 ? 0.5 : 1
+                            }}
+                          >
+                            <span style={{
+                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontStyle: 'normal',
+                              fontWeight: 500,
+                              fontSize: '10px',
+                              lineHeight: '12px',
+                              textAlign: 'center',
+                              color: '#343434'
+                            }}>
+                              half
+                            </span>
                       </button>
+                        </div>
             </div>
 
-            {/* Amount input on the right */}
-            <div style={{ position: 'relative', flex: 1 }}>
+                      {/* Amount display and USD equivalent */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '93px' }}>
+                        <div style={{
+                          width: '93px',
+                          height: '48px',
+                          fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                          fontStyle: 'normal',
+                          fontWeight: 400,
+                          fontSize: '40px',
+                          lineHeight: '48px',
+                          color: '#000000',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}>
           <input
             type="number"
             step="0.01"
@@ -1702,47 +1815,165 @@ export default function ProdPage() {
                     }
                   }
                 }}
-                placeholder={amountUnit === 'SOL' ? 'Enter amount in SOL' : 'Enter amount in USD'}
+                            placeholder="0"
                 disabled={loading || (amountUnit === 'USD' && !solPrice)}
             required
             style={{
               width: '100%',
-                  padding: '12px 80px 12px 16px',
-                  background: '#fff',
-                  border: `1px solid ${splitPreview?.result?.valid ? '#22c55e' : splitPreview?.result?.error ? '#ef4444' : '#ddd'}`,
-              borderRadius: '8px',
+                              background: 'transparent',
+                              border: 'none',
                   color: '#000',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-              {equivalentText && (
-                <span
+                              fontSize: '40px',
+                              fontWeight: 400,
+                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              lineHeight: '48px',
+                              padding: 0,
+                              outline: 'none'
+                            }}
+                          />
+                        </div>
+                        {amount && parseFloat(amount) > 0 && equivalentText && (
+                          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px', width: '84px', height: '20px' }}>
+                            <span style={{
+                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontStyle: 'normal',
+                              fontWeight: 400,
+                              fontSize: '16px',
+                              lineHeight: '19px',
+                              color: '#000000',
+                              opacity: 0.4,
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}>
+                              {equivalentText}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleAmountUnitChange(amountUnit === 'SOL' ? 'USD' : 'SOL')}
+                              disabled={!solPrice}
                   style={{
-                    position: 'absolute',
-                    right: '16px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '11px',
-                    color: '#999',
-                    pointerEvents: 'none',
-                    fontFamily: 'monospace',
-                    maxWidth: '70px',
-                    textAlign: 'right',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis'
-                  }}
-                >
-                  {equivalentText}
-                </span>
+                                display: 'flex',
+                                flexDirection: 'row',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                padding: 0,
+                                gap: '5.57px',
+                                width: '20px',
+                                height: '20px',
+                                background: 'rgba(255, 255, 255, 0.2)',
+                                boxShadow: '0px 3.2px 9.6px rgba(0, 0, 0, 0.05), inset 0px 1.6px 3.36px rgba(243, 243, 243, 0.25), inset 0px -2.4px 3.2px #F9F9F9',
+                                borderRadius: '38.452px',
+                                border: 'none',
+                                cursor: !solPrice ? 'not-allowed' : 'pointer',
+                                opacity: !solPrice ? 0.5 : 1
+                              }}
+                            >
+                              <img src="/convert.svg" alt="Convert" style={{ width: '10.95px', height: '10.95px' }} />
+                            </button>
+                          </div>
                     )}
                   </div>
             </div>
-          <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
-            Min {formatSolAmount(0.035 * chunks, solPrice, 2)}
-            {maxSolAmount && (
-              <> • Max {formatSolAmount(maxSolAmount, solPrice, 2)}</>
+
+                    {/* SOL button on right */}
+                    <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: '9px 15px', gap: '8px', width: '108px', height: '55px', background: 'rgba(0, 0, 0, 0.004)', boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9', borderRadius: '10px' }}>
+                      <div style={{ width: '38px', height: '38px', background: '#F4F4F4', borderRadius: '157.984px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {amountUnit === 'SOL' ? (
+                          <img src="/sol.svg" alt="SOL" style={{ width: '17px', height: '14px' }} />
+                        ) : (
+                          <span style={{ fontSize: '20px' }}>☰</span>
+                        )}
+                      </div>
+                      <span style={{
+                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontStyle: 'normal',
+                        fontWeight: 300,
+                        fontSize: '18px',
+                        lineHeight: '21px',
+                        textAlign: 'center',
+                        letterSpacing: '0.03em',
+                        color: '#000000'
+                      }}>
+                        {amountUnit}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+        
+                {/* Destination Address Section */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', margin: 0, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '163px', height: '19px', margin: 0 }}>
+                    <img src="/wallet.svg" alt="Destination" style={{ width: '18px', height: '18px', display: 'block', flexShrink: 0, opacity: 0.5, margin: 0 }} />
+                    <label style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 400,
+                      fontSize: '16px',
+                      lineHeight: '19px',
+                      color: '#343434',
+                      opacity: 0.5,
+                      whiteSpace: 'nowrap',
+                      margin: 0,
+                      padding: 0
+                    }}>
+                      Destination Address
+                    </label>
+                  </div>
+                  <div style={{
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '20px 15px',
+                    gap: '10px',
+                    width: '100%',
+                    border: '1px solid #E8E8E8',
+                    borderRadius: '8px',
+                    background: '#fff'
+                  }}>
+                    <input
+                      type="text"
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      placeholder="Solana wallet address"
+                      disabled={loading}
+                      required
+                      style={{
+                        flex: 1,
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#000',
+                        fontSize: '16px',
+                        lineHeight: '19px',
+                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontStyle: 'normal',
+                        fontWeight: 400,
+                        outline: 'none',
+                        margin: 0,
+                        padding: 0,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        minWidth: 0
+                      }}
+                    />
+                    {destination && isValidSolanaAddress(destination) && (
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: '6.048px 8.064px',
+                        gap: '4.03px',
+                        width: '20.3px',
+                        height: '20.3px',
+                        background: '#42D17B',
+                        boxShadow: '0px 2.8px 8.4px rgba(0, 0, 0, 0.03)',
+                        borderRadius: '35.7px'
+                      }}>
+                        <span style={{ color: '#FFFFFF', fontSize: '13.44px', lineHeight: '13.44px' }}>✓</span>
+                      </div>
           )}
         </div>
         </div>
@@ -2006,14 +2237,103 @@ export default function ProdPage() {
                   </div>
         )}
         
-        {/* Privacy Slider */}
-        <div style={{ marginBottom: '24px' }}>
-          <PrivacySlider
-            value={privacySliderValue}
-            onChange={setPrivacySliderValue}
-            onSettingsClick={() => setShowSettingsModal(true)}
+                {/* Transfer Time Section */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', height: '20px' }}>
+                    <span style={{
+                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontStyle: 'normal',
+                      fontWeight: 400,
+                      fontSize: '16px',
+                      lineHeight: '19px',
+                      color: '#000000'
+                    }}>
+                      Transfer Time
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsModal(true)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                        width: '20px',
+                        height: '20px',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <img src="/gear.svg" alt="Settings" style={{ width: '20px', height: '20px' }} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '17px', width: '100%' }}>
+                    {[
+                      { minutes: 5, label: '5 Min', level: 'Low', color: '#D54E50' },
+                      { minutes: 15, label: '~15 Min', level: 'Moderate', color: '#D2B375' },
+                      { minutes: 30, label: '~30 Min', level: 'High', color: '#BBC45B' },
+                      { minutes: 240, label: '~4 Hrs', level: 'Excellent', color: '#4ED584' }
+                    ].map((option) => {
+                      // Check if selected - account for rounding errors by checking if delayMinutes is within 1 minute of target
+                      const isSelected = Math.abs(delayMinutes - option.minutes) <= 1;
+                      return (
+                        <button
+                          key={option.minutes}
+                          type="button"
+                          onClick={() => {
+                            // Set slider value that will result in the exact minutes we want
+                            // Don't round here to avoid precision loss
+                            const sliderValue = (option.minutes / 240) * 100;
+                            setPrivacySliderValue(sliderValue);
+                          }}
             disabled={loading}
-          />
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            padding: '8.64px 11.52px',
+                            gap: '10px',
+                            width: isSelected ? '164px' : '163px',
+                            height: '91px',
+                            background: isSelected ? 'rgba(78, 213, 132, 0.1)' : 'rgba(255, 255, 255, 0.18)',
+                            boxShadow: isSelected 
+                              ? '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9'
+                              : '0px 4px 12px rgba(0, 0, 0, 0.03)',
+                            borderRadius: '10px',
+                            border: 'none',
+                            cursor: loading ? 'not-allowed' : 'pointer',
+                            opacity: loading ? 0.5 : 1
+                          }}
+                        >
+                          <span style={{
+                            fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                            fontStyle: 'normal',
+                            fontWeight: 400,
+                            fontSize: '16px',
+                            lineHeight: '19px',
+                            textAlign: 'center',
+                            color: '#343434'
+                          }}>
+                            {option.label}
+                          </span>
+                          <span style={{
+                            fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                            fontStyle: 'normal',
+                            fontWeight: 500,
+                            fontSize: '11px',
+                            lineHeight: '13px',
+                            textAlign: 'center',
+                            color: option.color
+                          }}>
+                            {option.level}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
           </div>
 
         {/* Error Display */}
@@ -2074,31 +2394,43 @@ export default function ProdPage() {
           </div>
                 )}
         
-        {/* Submit Button */}
+                {/* Review Button */}
                 <button 
           type="button"
           onClick={handleSubmit}
           disabled={!isFormValid}
                   style={{
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    padding: '18px 62px',
+                    gap: '7px',
             width: '100%',
-            padding: '14px',
-            background: isFormValid ? '#000' : '#ccc',
-                    color: '#fff',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontWeight: '700',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-            cursor: isFormValid ? 'pointer' : 'not-allowed',
-            opacity: isFormValid ? 1 : 0.6
-          }}
-        >
-          {loading ? 'Processing...' : splitPreview?.result?.valid 
-            ? `Send ${formatSolAmount(splitPreview.result.totalSol, solPrice, 6)} Privately` 
-            : meetsMinimum 
-              ? `Send ${formatSolAmount(amountSolForUi, solPrice, 6)} (Custom Split)` 
-              : 'Enter valid amount'}
+                    height: '68px',
+                    background: 'rgba(0, 0, 0, 0.004)',
+                    opacity: !isFormValid ? 0.3 : 1,
+                    border: '2px solid #FFFFFF',
+                    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                    borderRadius: '15px',
+                    cursor: isFormValid ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  <span style={{
+                    fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                    fontStyle: 'normal',
+                    fontWeight: 400,
+                    fontSize: '18px',
+                    lineHeight: '21px',
+                    textAlign: 'center',
+                    color: '#000000'
+                  }}>
+                    {loading ? 'Processing...' : 'Review'}
+                  </span>
                 </button>
+                </div>
+              </div>
       </section>
 
       {/* Right Panel: Steps / Progress */}
