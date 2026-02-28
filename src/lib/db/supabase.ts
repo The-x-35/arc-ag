@@ -7,8 +7,8 @@ export interface TransactionSession {
   current_step: number;
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'aborted';
   transaction_params: {
-    destination: string;
-    amount: number;
+    destination: string; // Can be encrypted (base64) or plain text
+    amount: number | string; // Can be encrypted (base64 string) or plain number
     numChunks: number;
     delayMinutes: number;
     exactChunks?: number[];
