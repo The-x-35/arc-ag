@@ -113,6 +113,41 @@ export default function ProdPage() {
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
   const [abortStatus, setAbortStatus] = useState<{ success: boolean; recovered: number; errors: string[] } | null>(null);
   
+  // Warning banner state
+  const [warningDismissed, setWarningDismissed] = useState(false);
+  
+  // Timer state for privacy delay
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [timerStartTime, setTimerStartTime] = useState<number | null>(null);
+  
+  // Timer effect - show timer when transaction is active
+  useEffect(() => {
+    if (steps.length === 0 || !loading) {
+      setTimerStartTime(null);
+      setRemainingSeconds(null);
+      return;
+    }
+    
+    // Start timer when transaction begins
+    if (steps.length > 0 && loading && !timerStartTime) {
+      setTimerStartTime(Date.now());
+      setRemainingSeconds(delayMinutes * 60);
+    }
+    
+    if (timerStartTime && remainingSeconds !== null && remainingSeconds > 0) {
+      const interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - timerStartTime) / 1000);
+        const remaining = Math.max(0, (delayMinutes * 60) - elapsed);
+        setRemainingSeconds(remaining);
+        if (remaining === 0) {
+          clearInterval(interval);
+        }
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [steps.length, loading, delayMinutes, timerStartTime, remainingSeconds]);
+  
   // Handle abort confirmation
   const handleAbortConfirm = async () => {
     setShowAbortConfirm(false);
@@ -818,7 +853,7 @@ export default function ProdPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
             <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
-            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
+            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: 'SF Pro Rounded' }}>VPM</h1>
           </div>
           <div style={{
             background: '#f5f5f5',
@@ -827,7 +862,7 @@ export default function ProdPage() {
             padding: '32px',
             width: '100%'
           }}>
-            <h2 style={{ fontSize: '40px', fontWeight: '700', color: '#000', marginBottom: '8px', textAlign: 'center', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
+            <h2 style={{ fontSize: '40px', fontWeight: '700', color: '#000', marginBottom: '8px', textAlign: 'center', letterSpacing: '-0.02em', fontFamily: 'SF Pro Rounded' }}>
               Enter Invite Code
             </h2>
             <p style={{ color: '#666', fontSize: '14px', textAlign: 'center', marginBottom: '24px' }}>
@@ -920,7 +955,7 @@ export default function ProdPage() {
       )}
 
       {/* Main UI - Show always (invite temporarily disabled) */}
-      <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
       {/* Recovery Prompt */}
       {showRecoveryPrompt && connected && (
             <div
@@ -1001,8 +1036,7 @@ export default function ProdPage() {
                   fontWeight: 700,
                   color: '#0f172a',
                   letterSpacing: '-0.02em',
-                  fontFamily:
-                    '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
+                  fontFamily: 'SF Pro Rounded',
                 }}
               >
                 VPM
@@ -1106,7 +1140,7 @@ export default function ProdPage() {
                     />
                     <div
                       style={{
-                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontFamily: 'SF Pro Rounded',
                         fontStyle: 'normal',
                         fontWeight: 300,
                         fontSize: 13,
@@ -1124,7 +1158,7 @@ export default function ProdPage() {
                   {/* Balance */}
                 <div
                   style={{
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 500,
                       fontSize: 30,
@@ -1201,7 +1235,7 @@ export default function ProdPage() {
                   >
                     <span
                       style={{
-                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontFamily: 'SF Pro Rounded',
                         fontStyle: 'normal',
                         fontWeight: 400,
                         fontSize: 13,
@@ -1257,7 +1291,7 @@ export default function ProdPage() {
                   type="button"
                   onClick={() => {
                     if (connected) {
-                      disconnect?.().catch(() => {});
+                    disconnect?.().catch(() => {});
                     } else {
                       // Find and click the WalletMultiButton inside the hidden container
                       const button = walletButtonContainerRef.current?.querySelector('button');
@@ -1290,7 +1324,7 @@ export default function ProdPage() {
                 >
                   <span
                     style={{
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 500,
                       fontSize: 12.8,
@@ -1366,7 +1400,7 @@ export default function ProdPage() {
                   />
                   <div
                     style={{
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 300,
                       fontSize: 16,
@@ -1435,7 +1469,7 @@ export default function ProdPage() {
                           >
                             <div
                               style={{
-                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                                 fontStyle: 'normal',
                                 fontWeight: 500,
                                 fontSize: 14,
@@ -1451,7 +1485,7 @@ export default function ProdPage() {
                         </div>
                         <div
                           style={{
-                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                                 fontStyle: 'normal',
                                 fontWeight: 400,
                                 fontSize: 12,
@@ -1474,7 +1508,7 @@ export default function ProdPage() {
                           >
                             <div
                               style={{
-                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                                 fontStyle: 'normal',
                                 fontWeight: 500,
                                 fontSize: 13,
@@ -1488,7 +1522,7 @@ export default function ProdPage() {
                             </div>
                             <div
                               style={{
-                                fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                                 fontStyle: 'normal',
                                 fontWeight: 400,
                           fontSize: 12,
@@ -1505,7 +1539,7 @@ export default function ProdPage() {
                   ) : (
                     <div
                       style={{
-                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontFamily: 'SF Pro Rounded',
                         fontStyle: 'normal',
                         fontWeight: 400,
                         fontSize: 12,
@@ -1611,7 +1645,7 @@ export default function ProdPage() {
                 >
                 {/* Send Header */}
                 <h2 style={{
-                  fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                   fontStyle: 'normal',
                   fontWeight: 400,
                   fontSize: '32px',
@@ -1628,7 +1662,7 @@ export default function ProdPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '164px', height: '19px', margin: 0 }}>
                     <img src="/assets.svg" alt="Amount" style={{ width: '19px', height: '19px', display: 'block', flexShrink: 0, margin: 0 }} />
                     <label style={{
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 400,
                       fontSize: '16px',
@@ -1690,7 +1724,7 @@ export default function ProdPage() {
                             }}
                           >
                             <span style={{
-                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontFamily: 'SF Pro Rounded',
                               fontStyle: 'normal',
                               fontWeight: 500,
                               fontSize: '10px',
@@ -1733,7 +1767,7 @@ export default function ProdPage() {
                             }}
                           >
                             <span style={{
-                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontFamily: 'SF Pro Rounded',
                               fontStyle: 'normal',
                               fontWeight: 500,
                               fontSize: '10px',
@@ -1752,7 +1786,7 @@ export default function ProdPage() {
                         <div style={{
                           width: '100%',
                           height: '48px',
-                          fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                          fontFamily: 'SF Pro Rounded',
                           fontStyle: 'normal',
                           fontWeight: 400,
                           fontSize: '40px',
@@ -1799,7 +1833,7 @@ export default function ProdPage() {
                   color: '#000',
                               fontSize: '40px',
                               fontWeight: 400,
-                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontFamily: 'SF Pro Rounded',
                               lineHeight: '48px',
                               padding: 0,
                               outline: 'none'
@@ -1809,7 +1843,7 @@ export default function ProdPage() {
                         {amount && parseFloat(amount) > 0 && equivalentText && (
                           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px', width: '84px', height: '20px' }}>
                             <span style={{
-                              fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                              fontFamily: 'SF Pro Rounded',
                               fontStyle: 'normal',
                               fontWeight: 400,
                               fontSize: '16px',
@@ -1859,7 +1893,7 @@ export default function ProdPage() {
                         )}
                       </div>
                       <span style={{
-                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontFamily: 'SF Pro Rounded',
                         fontStyle: 'normal',
                         fontWeight: 300,
                         fontSize: '18px',
@@ -1879,7 +1913,7 @@ export default function ProdPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '163px', height: '19px', margin: 0 }}>
                     <img src="/wallet.svg" alt="Destination" style={{ width: '18px', height: '18px', display: 'block', flexShrink: 0, opacity: 0.5, margin: 0 }} />
                     <label style={{
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 400,
                       fontSize: '16px',
@@ -1920,7 +1954,7 @@ export default function ProdPage() {
                             color: '#000',
                         fontSize: '16px',
                         lineHeight: '19px',
-                        fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                        fontFamily: 'SF Pro Rounded',
                         fontStyle: 'normal',
                         fontWeight: 400,
                         outline: 'none',
@@ -1957,7 +1991,7 @@ export default function ProdPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', height: '20px' }}>
                     <span style={{ 
-                      fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'SF Pro Rounded',
                       fontStyle: 'normal',
                       fontWeight: 400,
                 fontSize: '16px',
@@ -1987,13 +2021,20 @@ export default function ProdPage() {
                       </div>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '17px', width: '100%' }}>
                     {[
-                      { minutes: 5, label: '5 Min', level: 'Low', color: '#D54E50' },
-                      { minutes: 15, label: '~15 Min', level: 'Moderate', color: '#D2B375' },
-                      { minutes: 30, label: '~30 Min', level: 'High', color: '#BBC45B' },
-                      { minutes: 240, label: '~4 Hrs', level: 'Excellent', color: '#4ED584' }
+                      { minutes: 5, label: 'Good', time: '5 Min', color: '#A7A7A7' },
+                      { minutes: 15, label: 'Strong', time: '~15 Min', color: '#B8980B' },
+                      { minutes: 30, label: 'Stronger', time: '~30 Min', color: '#98B80B' },
+                      { minutes: 240, label: 'Excellent', time: '~4 Hrs', color: '#0ABC16' }
                     ].map((option) => {
                       // Check if selected - account for rounding errors by checking if delayMinutes is within 1 minute of target
                       const isSelected = Math.abs(delayMinutes - option.minutes) <= 1;
+                      // Convert hex color to rgba with 10% opacity for selection background
+                      const hexToRgba = (hex: string, opacity: number) => {
+                        const r = parseInt(hex.slice(1, 3), 16);
+                        const g = parseInt(hex.slice(3, 5), 16);
+                        const b = parseInt(hex.slice(5, 7), 16);
+                        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+                      };
                       return (
                         <button
                           key={option.minutes}
@@ -2014,7 +2055,7 @@ export default function ProdPage() {
                             gap: '10px',
                             width: isSelected ? '164px' : '163px',
                             height: '91px',
-                            background: isSelected ? 'rgba(78, 213, 132, 0.1)' : 'rgba(255, 255, 255, 0.18)',
+                            background: isSelected ? hexToRgba(option.color, 0.1) : 'rgba(255, 255, 255, 0.18)',
                             boxShadow: isSelected 
                               ? '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9'
                               : '0px 4px 12px rgba(0, 0, 0, 0.03)',
@@ -2025,26 +2066,26 @@ export default function ProdPage() {
                           }}
                         >
                           <span style={{
-                            fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
-                            fontStyle: 'normal',
-                            fontWeight: 400,
-                            fontSize: '16px',
-                            lineHeight: '19px',
                             textAlign: 'center',
-                            color: '#343434'
+                            fontFamily: 'SF Pro Rounded',
+                            fontSize: '16px',
+                            fontStyle: 'normal',
+                            fontWeight: 500,
+                            lineHeight: 'normal',
+                            color: option.color
                           }}>
                             {option.label}
                           </span>
               <span style={{
-                            fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
-                            fontStyle: 'normal',
-                            fontWeight: 500,
-                        fontSize: '11px',
-                            lineHeight: '13px',
+                            color: '#343434',
                             textAlign: 'center',
-                            color: option.color
+                            fontFamily: 'SF Pro Rounded',
+                            fontSize: '12px',
+                            fontStyle: 'normal',
+                            fontWeight: 400,
+                            lineHeight: 'normal'
                           }}>
-                            {option.level}
+                            {option.time}
               </span>
                         </button>
                       );
@@ -2063,7 +2104,7 @@ export default function ProdPage() {
             color: '#FF2232',
             fontSize: '13px',
             fontWeight: '700',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
+            fontFamily: 'SF Pro Rounded'
           }}>
             {error}
           </div>
@@ -2080,7 +2121,7 @@ export default function ProdPage() {
             color: '#00A478',
             fontSize: '13px',
             fontWeight: '700',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
+            fontFamily: 'SF Pro Rounded'
           }}>
             <div style={{ marginBottom: '8px' }}>
               ✓ Complete! Sent {formatSolAmount(result.totalAmount, solPrice, 6)} to {result.recipient.slice(0,8)}...{result.recipient.slice(-8)}
@@ -2100,7 +2141,7 @@ export default function ProdPage() {
                       borderRadius: '6px',
                       color: '#fff',
                 fontWeight: '700',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
+                fontFamily: 'SF Pro Rounded',
                       cursor: 'pointer',
                 fontSize: '13px'
                     }}
@@ -2134,7 +2175,7 @@ export default function ProdPage() {
                   }}
                 >
                   <span style={{
-                    fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
+                                fontFamily: 'SF Pro Rounded',
                     fontStyle: 'normal',
                     fontWeight: 400,
                     fontSize: '18px',
@@ -2152,7 +2193,7 @@ export default function ProdPage() {
       {/* Right Panel: Steps / Progress */}
       <section
         style={{
-          flex: '0 0 300px',
+          flex: '0 0 500px',
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
@@ -2187,75 +2228,369 @@ export default function ProdPage() {
           }}
         />
         
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 20, flex: 1 }}>
+          {/* Warning Banner */}
+          {(loading || steps.length > 0) && !warningDismissed && (
           <div
             style={{
-              padding: 10,
-              borderRadius: 999,
-              background: 'rgba(254,243,199,0.95)',
-              border: '1px solid rgba(234,179,8,0.7)',
-              fontSize: 11,
-              color: '#92400e',
-              textAlign: 'center',
-            }}
-          >
-            Do not close this webpage while the transaction is in progress.
-          </div>
-          {steps.length > 0 ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
+                position: 'relative',
+                padding: '12px 16px',
+                borderRadius: '8px',
+                background: '#FEF3C7',
+                border: '1px solid #FCD34D',
                 fontSize: 12,
-                color: '#4b5563',
+                color: '#92400E',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
               }}
             >
-              <span>
-                {steps.filter((s) => s.status === 'completed').length} / {steps.length} steps
-              </span>
-              <span style={{ fontWeight: 600, color: '#111827' }}>
-                {loading ? 'Transaction In Progress' : 'Idle'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 2L2 14H14L8 2Z" fill="#F59E0B" stroke="#92400E" strokeWidth="1"/>
+                  <path d="M8 6V10M8 12H8.01" stroke="#92400E" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>Do not close this webpage while the transaction is in progress.</span>
             </div>
-            <PrivacyProgressBar steps={steps} />
-            {/* Mission Abort Button */}
-            {steps.some(s => s.status === 'running') && (
               <button
                 type="button"
-                onClick={() => setShowAbortConfirm(true)}
-                disabled={isAborting}
+                onClick={() => setWarningDismissed(true)}
                 style={{
-                  marginTop: 12,
-                  padding: '10px 20px',
-                  background: isAborting ? '#9ca3af' : '#ef4444',
-                  color: '#fff',
+                  background: 'transparent',
                   border: 'none',
-                  borderRadius: '8px',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: isAborting ? 'not-allowed' : 'pointer',
-                  opacity: isAborting ? 0.6 : 1,
-                  transition: 'all 0.2s',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
               >
-                {isAborting ? 'Aborting...' : 'Mission Abort'}
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 3L3 9M3 3L9 9" stroke="#92400E" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
               </button>
-            )}
+            </div>
+          )}
+          
+          {steps.length > 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Circular Timer */}
+              {remainingSeconds !== null && remainingSeconds > 0 && (() => {
+                const minutes = Math.floor(remainingSeconds / 60);
+                const seconds = remainingSeconds % 60;
+                const totalSeconds = delayMinutes * 60;
+                const progress = (remainingSeconds / totalSeconds) * 100;
+                const radius = 116.529; // From Figma border-radius
+                const circumference = 2 * Math.PI * radius;
+                const offset = circumference - (progress / 100) * circumference;
+                const size = radius * 2; // Diameter based on radius
+                
+                return (
+                  <div style={{ 
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    width: '100%'
+                  }}>
+                    <div style={{ 
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      borderRadius: '50%',
+                      background: '#FFFFFF',
+                      position: 'relative',
+                      width: `${size}px`,
+                      height: `${size}px`,
+                      boxShadow: '0 4.805px 14.416px 0 rgba(0, 0, 0, 0.05)'
+                    }}>
+                      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ 
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        transform: 'rotate(-90deg)'
+                      }}>
+                        <circle
+                          cx={radius}
+                          cy={radius}
+                          r={radius - 8}
+                          fill="none"
+                          stroke="#10B981"
+                          strokeWidth="16"
+                          strokeDasharray={circumference}
+                          strokeDashoffset={offset}
+                          strokeLinecap="round"
+                          style={{ transition: 'stroke-dashoffset 1s linear' }}
+                        />
+                      </svg>
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        textAlign: 'center',
+                        zIndex: 1
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          fontWeight: '700',
+                          color: '#1F2937',
+                          fontFamily: 'SF Pro Rounded',
+                          lineHeight: '1.2'
+                        }}>
+                          {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+                        </div>
+                        <div style={{
+                          fontSize: '12px',
+                          color: '#9CA3AF',
+                          fontFamily: 'SF Pro Rounded',
+                          lineHeight: '14px',
+                          marginTop: '4px'
+                        }}>
+                          remaining
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              {/* Steps List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                {[
+                  { label: 'Preparing Fresh Wallets', description: 'generating first set of intermediary wallets' },
+                  { label: 'Splitting Funds', description: 'sending from your wallet to fresh wallets' },
+                  { label: 'Blending In', description: 'waiting for the privacy pool to have matching activity so your amount doesn\'t stand out' },
+                  { label: 'Mixing Funds', description: 'depositing into the privacy pool' },
+                  { label: 'Collecting to New Wallets', description: 'withdrawing to a new set of fresh wallets' },
+                  { label: 'Cooling Down', description: 'waiting so the timing doesn\'t create a traceable pattern' },
+                  { label: 'Second Blend', description: 'depositing into the pool again for a second pass' },
+                  { label: 'Final Collection', description: 'withdrawing to the last set of fresh wallets' },
+                  { label: 'Delivering to Destination', description: 'sending to your target wallet' },
+                  { label: 'Cleaning Up', description: 'confirming everything landed, done' }
+                ].map((stepInfo, index) => {
+                  const stepId = index + 1;
+                  const step = steps.find(s => s.id === stepId);
+                  const status = step?.status || 'pending';
+                  const message = step?.message || (status === 'running' ? stepInfo.description : undefined);
+                  
+                  return (
+                    <div
+                      key={stepId}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '12px'
+                      }}
+                    >
+                      {/* Status Icon */}
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginTop: '2px'
+                      }}>
+                        {status === 'completed' ? (
+                          <div style={{
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            background: '#10B981',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </div>
+                        ) : status === 'running' ? (
+                          <div style={{
+                            width: '20px',
+                            height: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <div style={{
+                              width: '16px',
+                              height: '16px',
+                              border: '2px solid #3B82F6',
+                              borderTopColor: 'transparent',
+                              borderRadius: '50%',
+                              animation: 'spin 1s linear infinite'
+                            }} />
+                            <style>{`
+                              @keyframes spin {
+                                to { transform: rotate(360deg); }
+                              }
+                            `}</style>
           </div>
         ) : (
+                          <div style={{
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '50%',
+                            border: '2px solid #9CA3AF',
+                            background: 'transparent'
+                          }} />
+                        )}
+                      </div>
+                      
+                      {/* Step Content */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: status === 'running' ? '13px' : '12px',
+                          fontWeight: status === 'running' ? '500' : '400',
+                          color: '#000',
+                          fontFamily: 'SF Pro Rounded',
+                          lineHeight: status === 'running' ? '16px' : '14px'
+                        }}>
+                          {stepId}. {stepInfo.label}
+                        </div>
+                        {status === 'running' && (
+                          <div style={{
+                            fontSize: '13px',
+                            fontWeight: '400',
+                            color: '#666',
+                            fontFamily: 'SF Pro Rounded',
+                            lineHeight: '16px',
+                            marginTop: '4px'
+                          }}>
+                            {stepInfo.description}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Summary Bar */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '16px',
+                padding: '16px',
+                background: '#F9FAFB',
+                borderRadius: '8px',
+                border: '1px solid #E5E7EB'
+              }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#666', fontFamily: 'SF Pro Rounded', marginBottom: '4px' }}>Sending</div>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#000', fontFamily: 'SF Pro Rounded' }}>
+                    {result?.totalAmount ? formatSolAmount(result.totalAmount / LAMPORTS_PER_SOL, solPrice, 2) : amount && parseFloat(amount) > 0 ? formatSolAmount(parseFloat(amount), solPrice, 2) : '-'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#666', fontFamily: 'SF Pro Rounded', marginBottom: '4px', lineHeight: '14px' }}>Privacy Score</div>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    {splitPreview.privacyScore ? (() => {
+                      const levelColors: Record<string, string> = {
+                        'weak': '#A7A7A7',        // good
+                        'moderate': '#B8980B',     // strong
+                        'strong': '#98B80B',       // stronger
+                        'very-strong': '#0ABC16',  // excellent
+                        'excellent': '#0ABC16'     // excellent
+                      };
+                      
+                      const levelLabels: Record<string, string> = {
+                        'weak': 'Good',
+                        'moderate': 'Strong',
+                        'strong': 'Stronger',
+                        'very-strong': 'Excellent',
+                        'excellent': 'Excellent'
+                      };
+                      
+                      const level = splitPreview.privacyScore.level === 'very-strong' ? 'excellent' : splitPreview.privacyScore.level;
+                      const color = levelColors[level] || '#666';
+                      const label = levelLabels[level] || 'Unknown';
+                      
+                      // Convert hex color to rgba with 20% opacity for background
+                      const hexToRgba = (hex: string, opacity: number) => {
+                        const r = parseInt(hex.slice(1, 3), 16);
+                        const g = parseInt(hex.slice(3, 5), 16);
+                        const b = parseInt(hex.slice(5, 7), 16);
+                        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+                      };
+                      
+                      return (
+                        <span style={{
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          fontSize: 9,
+                          fontWeight: 500,
+                          color: color,
+                          background: hexToRgba(color, 0.2),
+                          boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'SF Pro Rounded'
+                        }}>
+                          {label} ({formatPrivacyScore(splitPreview.privacyScore.pss)})
+                        </span>
+                      );
+                    })() : (
+                      <span style={{ fontSize: '14px', fontWeight: '600', color: '#000', fontFamily: 'SF Pro Rounded' }}>-</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#666', fontFamily: 'SF Pro Rounded', marginBottom: '4px', lineHeight: '14px' }}>Destination</div>
+                  <div style={{ fontSize: '12px', fontWeight: '400', color: '#000', fontFamily: 'monospace', lineHeight: '14px' }}>
+                    {destination ? `${destination.slice(0, 8)}...${destination.slice(-6)}` : '-'}
+                  </div>
+                </div>
+              </div>
+            </div>
+        ) : (
+          <>
+            {/* First Inner Box: Recommendations */}
           <div
             style={{
-              flex: 1,
+                position: 'relative',
+                width: '100%',
               display: 'flex',
               flexDirection: 'column',
-              gap: 16,
-            }}
-          >
+                alignItems: 'flex-start',
+                padding: '25px 20px',
+                gap: 25,
+                background: 'linear-gradient(135deg, rgba(245, 245, 245, 0.2) 0%, rgba(255, 255, 255, 0.7) 100%)',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
+                boxShadow: `
+                  inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                  inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                  inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                  inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                  0 4px 12px rgba(0, 0, 0, 0.05)
+                `,
+                backdropFilter: 'blur(20px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                borderRadius: 20,
+                overflow: 'hidden',
+              }}
+            >
+              {/* Gradient overlay for glassy effect */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'linear-gradient(135deg, rgba(230, 230, 230, 0.1) 0%, rgba(255, 255, 255, 0.6) 100%)',
+                  pointerEvents: 'none',
+                  borderRadius: 20,
+                }}
+              />
+              <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Recommendations Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: 16, fontWeight: 500, color: '#000' }}>Recommended</span>
+                  <img src="/recommended.svg" alt="Recommended" style={{ width: '15px', height: '18px', display: 'block' }} />
+                  <span style={{ fontSize: 16, fontWeight: 500, color: '#000', fontFamily: 'SF Pro Rounded' }}>Recommended</span>
             </div>
             
             {/* Recommendations Table */}
@@ -2280,18 +2615,19 @@ export default function ProdPage() {
                 );
               }
               
+              // Map privacy score levels to new labels and colors
               const levelColors: Record<string, string> = {
-                'weak': '#D54E50',
-                'moderate': '#D2B375',
-                'strong': '#BBC45B',
-                'very-strong': '#4ED584',
-                'excellent': '#4ED584'
+                'weak': '#A7A7A7',        // good
+                'moderate': '#B8980B',     // strong
+                'strong': '#98B80B',       // stronger
+                'very-strong': '#0ABC16',  // excellent
+                'excellent': '#0ABC16'     // excellent
               };
               
               const levelLabels: Record<string, string> = {
-                'weak': 'Weak',
-                'moderate': 'Moderate',
-                'strong': 'High',
+                'weak': 'Good',
+                'moderate': 'Strong',
+                'strong': 'Stronger',
                 'very-strong': 'Excellent',
                 'excellent': 'Excellent'
               };
@@ -2302,12 +2638,14 @@ export default function ProdPage() {
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: '1fr 1fr 1fr',
-                    gap: '12px',
-                    padding: '8px 0',
+                    gap: '20px',
+                    padding: '12px 0',
                     borderBottom: '1px solid #E8E8E8',
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: 500,
-                    color: '#666'
+                    color: '#666',
+                    fontFamily: 'SF Pro Rounded',
+                    lineHeight: '16px'
                   }}>
                     <div>Privacy Strength</div>
                     <div>Amount</div>
@@ -2319,27 +2657,39 @@ export default function ProdPage() {
                     <div style={{
                       display: 'grid',
                       gridTemplateColumns: '1fr 1fr 1fr',
-                      gap: '12px',
-                      padding: '12px 0',
+                      gap: '20px',
+                      padding: '16px 0',
                       borderBottom: '1px solid #E8E8E8',
-                      fontSize: 14,
-                      color: '#000'
+                      fontSize: 13,
+                      color: '#000',
+                      fontFamily: 'SF Pro Rounded',
+                      lineHeight: '16px'
                     }}>
                       {/* Privacy Strength for user's amount */}
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
                         {splitPreview?.privacyScore ? (() => {
                           const level = splitPreview.privacyScore.level === 'very-strong' ? 'excellent' : splitPreview.privacyScore.level;
                           const color = levelColors[level] || '#666';
                           const label = levelLabels[level] || 'Unknown';
+                          // Convert hex color to rgba with 20% opacity for background
+                          const hexToRgba = (hex: string, opacity: number) => {
+                            const r = parseInt(hex.slice(1, 3), 16);
+                            const g = parseInt(hex.slice(3, 5), 16);
+                            const b = parseInt(hex.slice(5, 7), 16);
+                            return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+                          };
                           return (
                             <span style={{
                               padding: '4px 8px',
                               borderRadius: '12px',
-                              fontSize: 11,
+                              fontSize: 13,
                               fontWeight: 500,
                               color: color,
-                              background: `${color}15`,
-                              border: `1px solid ${color}30`
+                              background: hexToRgba(color, 0.2),
+                              boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                              whiteSpace: 'nowrap',
+                              fontFamily: 'SF Pro Rounded',
+                              lineHeight: '16px'
                             }}>
                               {label} ({formatPrivacyScore(splitPreview.privacyScore.pss)})
                             </span>
@@ -2349,22 +2699,28 @@ export default function ProdPage() {
                         )}
                       </div>
                       
-                      {/* User's Amount */}
+                      {/* Amount */}
                       <div style={{ 
-                        fontSize: 14,
+                        fontSize: 13,
                         color: '#000',
                         display: 'flex',
-                        alignItems: 'center'
+                        alignItems: 'center',
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'SF Pro Rounded',
+                        lineHeight: '16px'
                       }}>
-                        {formatSolAmount(amountSolForUi, solPrice, 2)}
+                        {amountSolForUi.toFixed(2)} sol {solPrice ? `| $${Math.round(amountSolForUi * solPrice)}` : ''}
                       </div>
                       
                       {/* Time */}
                       <div style={{ 
-                        fontSize: 14,
+                        fontSize: 13,
                         color: '#000',
                         display: 'flex',
-                        alignItems: 'center'
+                        alignItems: 'center',
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'SF Pro Rounded',
+                        lineHeight: '16px'
                       }}>
                         {delayMinutes < 60 
                           ? `${delayMinutes} min` 
@@ -2421,8 +2777,8 @@ export default function ProdPage() {
                         style={{
                           display: 'grid',
                           gridTemplateColumns: '1fr 1fr 1fr',
-                          gap: '12px',
-                          padding: '12px 0',
+                          gap: '20px',
+                          padding: '16px 0',
                           borderBottom: '1px solid #E8E8E8',
                           background: 'transparent',
                           border: 'none',
@@ -2441,36 +2797,56 @@ export default function ProdPage() {
                         }}
                       >
                         {/* Privacy Strength */}
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                          {(() => {
+                            // Convert hex color to rgba with 20% opacity for background
+                            const hexToRgba = (hex: string, opacity: number) => {
+                              const r = parseInt(hex.slice(1, 3), 16);
+                              const g = parseInt(hex.slice(3, 5), 16);
+                              const b = parseInt(hex.slice(5, 7), 16);
+                              return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+                            };
+                            return (
                           <span style={{
                             padding: '4px 8px',
                             borderRadius: '12px',
-                            fontSize: 11,
+                                fontSize: 13,
                             fontWeight: 500,
                             color: privacyColor,
-                            background: `${privacyColor}15`,
-                            border: `1px solid ${privacyColor}30`
+                                background: hexToRgba(privacyColor, 0.2),
+                                boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.05), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9',
+                                whiteSpace: 'nowrap',
+                                fontFamily: 'SF Pro Rounded',
+                                lineHeight: '16px'
                           }}>
                             {privacyLabel} ({formatPrivacyScore(suggestionPrivacyScore.pss)})
                           </span>
+                            );
+                          })()}
                         </div>
                         
                         {/* Amount */}
                         <div style={{ 
-                          fontSize: 14,
+                          fontSize: 13,
                           color: '#000',
                           display: 'flex',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'SF Pro Rounded',
+                          lineHeight: '16px'
                         }}>
-                          {formatSolAmount(suggestion.sol, solPrice, 2)}
+                          {suggestion.sol.toFixed(2)} sol {solPrice ? `| $${Math.round(suggestion.sol * solPrice)}` : ''}
                         </div>
                         
                         {/* Time */}
                         <div style={{ 
-                          fontSize: 14,
+                          fontSize: 13,
                           color: '#000',
                           display: 'flex',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'SF Pro Rounded',
+                          lineHeight: '16px'
                         }}>
                           {timeText}
                         </div>
@@ -2481,6 +2857,93 @@ export default function ProdPage() {
               );
             })()}
             </div>
+            </div>
+
+            {/* Second Inner Box: What's Protecting me */}
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                padding: '25px 20px',
+                gap: 25,
+                background: 'linear-gradient(135deg, rgba(245, 245, 245, 0.2) 0%, rgba(255, 255, 255, 0.7) 100%)',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
+                boxShadow: `
+                  inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+                  inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+                  inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+                  inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+                  0 4px 12px rgba(0, 0, 0, 0.05)
+                `,
+                backdropFilter: 'blur(20px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                borderRadius: 20,
+                overflow: 'hidden',
+              }}
+            >
+              {/* Gradient overlay for glassy effect */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'linear-gradient(135deg, rgba(230, 230, 230, 0.1) 0%, rgba(255, 255, 255, 0.6) 100%)',
+                  pointerEvents: 'none',
+                  borderRadius: 20,
+                }}
+              />
+              <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: 16, fontWeight: 500, color: '#000', fontFamily: 'SF Pro Rounded' }}>What's Protecting me</span>
+                </div>
+                
+                {/* Protection Features */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* Timing randomization */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ width: 15, height: 15, flexShrink: 0, marginTop: 2 }}>
+                      <img src="/time-schedule.svg" alt="Timing randomization" style={{ width: '15px', height: '15px', display: 'block' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, color: '#666', lineHeight: '1.5', fontFamily: 'SF Pro Rounded' }}>
+                        Timing randomization: Whether delays between hops are randomized or fixed (randomized is harder to trace)
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Denomination mixing */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ width: 15, height: 15, flexShrink: 0, marginTop: 2 }}>
+                      <img src="/blender.svg" alt="Denomination mixing" style={{ width: '15px', height: '15px', display: 'block' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, color: '#666', lineHeight: '1.5', fontFamily: 'SF Pro Rounded' }}>
+                        Denomination mixing: The split uses common historical amounts so your tx blends in
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Unique wallet addresses */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ width: 15, height: 15, flexShrink: 0, marginTop: 2 }}>
+                      <img src="/wallet-04.svg" alt="Unique wallet addresses" style={{ width: '15px', height: '15px', display: 'block' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, color: '#666', lineHeight: '1.5', fontFamily: 'SF Pro Rounded' }}>
+                        Unique wallet addresses: Fresh wallets are used to avoid linkage, never reused
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
           )}
         </div>
       </section>
