@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+import { WalletMultiButton, useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { getSolanaRpc } from '@/lib/config/networks';
 import { poolRegistry } from '@/lib/pools/registry';
@@ -81,9 +81,11 @@ export default function ProdPage() {
   
   // Connection ref for indexing
   const connectionRef = useRef<Connection | null>(null);
+  const walletButtonContainerRef = useRef<HTMLDivElement>(null);
   
   // Wallet state
-  const { connected, publicKey, disconnect } = useWallet();
+  const { connected, publicKey, disconnect, select } = useWallet();
+  const { setVisible } = useWalletModal();
   
   // Hooks
   const walletSend = useWalletPrivateSend();
@@ -91,7 +93,7 @@ export default function ProdPage() {
   const { getSessionHistory } = useSessionRecovery();
   const { price: solPrice } = useSolPrice();
   
-  // Sessions (left panel)
+  // Transaction History (left panel)
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   
@@ -802,33 +804,6 @@ export default function ProdPage() {
         background: '#FFFFFF',
       }}
     >
-      {/* Wallet Connect Screen - Show if not connected */}
-      {!connected && (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '80vh',
-          gap: '24px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-            <img src="/image.png" alt="VPM Logo" style={{ height: '48px', width: 'auto' }} />
-            <h1 style={{ fontSize: '64px', fontWeight: '700', color: '#000', letterSpacing: '-0.02em', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>VPM</h1>
-          </div>
-          <p style={{ color: '#666', fontSize: '16px', textAlign: 'center', marginBottom: '16px' }}>
-            Connect your Solana wallet to continue
-          </p>
-          <WalletMultiButton style={{
-            background: '#000',
-            borderRadius: '8px',
-            height: '48px',
-            fontSize: '16px',
-            fontWeight: '600'
-          }} />
-        </div>
-      )}
-
       {/* Invite Code Input Screen - temporarily disabled */}
       {false && connected && !inviteCodeValidated && publicKey && (
         <div style={{
@@ -944,9 +919,8 @@ export default function ProdPage() {
         </div>
       )}
 
-      {/* Main UI - Show whenever wallet is connected (invite temporarily disabled) */}
-      {connected && (
-        <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
+      {/* Main UI - Show always (invite temporarily disabled) */}
+      <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
       {/* Recovery Prompt */}
       {showRecoveryPrompt && connected && (
             <div
@@ -1052,7 +1026,7 @@ export default function ProdPage() {
               flexWrap: 'wrap',
             }}
           >
-            {/* Left Panel: Wallet + Sessions */}
+            {/* Left Panel: Wallet + Transaction History */}
             <section
               style={{
                 flex: '0 0 300px',
@@ -1273,14 +1247,28 @@ export default function ProdPage() {
             </div>
                 )}
 
-                {/* Disconnect button */}
+                {/* Hidden WalletMultiButton for connection */}
+                <div ref={walletButtonContainerRef} style={{ display: 'none' }}>
+                  <WalletMultiButton />
+                </div>
+                
+                {/* Connect/Disconnect button */}
                 <button
                   type="button"
                   onClick={() => {
-                    if (!connected) return;
-                    disconnect?.().catch(() => {});
+                    if (connected) {
+                      disconnect?.().catch(() => {});
+                    } else {
+                      // Find and click the WalletMultiButton inside the hidden container
+                      const button = walletButtonContainerRef.current?.querySelector('button');
+                      if (button) {
+                        button.click();
+                      } else {
+                        // Fallback to opening modal directly
+                        setVisible(true);
+                      }
+                    }
                   }}
-                  disabled={!connected}
                   style={{
                     position: 'absolute',
                     left: 20,
@@ -1297,7 +1285,7 @@ export default function ProdPage() {
                     boxShadow: '0px 3.2px 9.6px rgba(0, 0, 0, 0.04)',
                     borderRadius: 39.2,
                     border: 'none',
-                    cursor: connected ? 'pointer' : 'not-allowed',
+                    cursor: 'pointer',
                   }}
                 >
                   <span
@@ -1312,27 +1300,12 @@ export default function ProdPage() {
                       height: 15,
                     }}
                   >
-                    Disconnect
+                    {connected ? 'Disconnect' : 'Connect'}
                   </span>
                 </button>
-
-                {/* Logo image */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 250,
-                    top: 157,
-                    width: 30,
-                    height: 30,
-                    borderRadius: 47,
-                    backgroundImage: 'url(/image.png)',
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }}
-                />
             </div>
 
-              {/* Sessions Card */}
+              {/* Transaction History Card */}
               <div
                     style={{
                   position: 'relative',
@@ -1371,20 +1344,20 @@ export default function ProdPage() {
                     borderRadius: 20,
                   }}
                 />
-                {/* Sessions Header */}
+                {/* Transaction History Header */}
                 <div
                   style={{
                     display: 'flex',
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 7,
-                    width: 71,
+                    width: 200,
                     height: 19,
                   }}
                 >
                   <img
                     src="/assets.svg"
-                    alt="Sessions"
+                    alt="Transaction History"
                     style={{
                       width: 19,
                       height: 19,
@@ -1400,15 +1373,14 @@ export default function ProdPage() {
                       lineHeight: '19px',
                       color: '#000000',
                       opacity: 0.5,
-                      width: 45,
                       height: 19,
                     }}
                   >
-                    Sessions
+                    Transaction History
               </div>
                 </div>
 
-                {/* Sessions List */}
+                {/* Transaction History List */}
                 <div
                   style={{
                     display: 'flex',
@@ -1541,7 +1513,7 @@ export default function ProdPage() {
                         color: '#747474',
                       }}
                     >
-                      {sessionsLoading ? 'Loading sessions...' : 'No sessions found'}
+                      {sessionsLoading ? 'Loading transaction history...' : 'No transactions found'}
                     </div>
                   )}
                 </div>
@@ -1683,9 +1655,9 @@ export default function ProdPage() {
                     background: '#fff'
                   }}>
                     {/* Left side: max/half buttons and amount */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '181px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flex: 1, minWidth: 0 }}>
                       {/* Max/Half buttons */}
-                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px', width: '181px', height: '30px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px', height: '30px' }}>
                         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '6px' }}>
               <button
                 type="button"
@@ -1776,9 +1748,9 @@ export default function ProdPage() {
             </div>
 
                       {/* Amount display and USD equivalent */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '93px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%', minWidth: 0 }}>
                         <div style={{
-                          width: '93px',
+                          width: '100%',
                           height: '48px',
                           fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
                           fontStyle: 'normal',
@@ -1787,7 +1759,8 @@ export default function ProdPage() {
                           lineHeight: '48px',
                           color: '#000000',
                           display: 'flex',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          minWidth: 0
                         }}>
           <input
             type="number"
@@ -2662,8 +2635,6 @@ export default function ProdPage() {
             onPoolsChange={setSelectedPools}
             availablePools={pools}
           />
-        </div>
-      )}
       
       {/* Abort Confirmation Dialog */}
       {showAbortConfirm && (
@@ -2748,6 +2719,7 @@ export default function ProdPage() {
           </div>
         </div>
       )}
+      </div>
     </main>
   );
 }
