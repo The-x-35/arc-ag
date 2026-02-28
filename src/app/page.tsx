@@ -372,12 +372,13 @@ export default function ProdPage() {
         splitResult = await transactionIndexer.findExactSplit(connection, amountLamports, numChunks, poolsToUse);
       }
       
-      // Get suggestions ONLY if split not valid and we didn't use suggestion chunks
+      // Always get suggestions so user can compare options, even if their amount works
       let suggestions: { amount: number; sol: number; chunks: number[] }[] = [];
       if (useSuggestionChunks) {
         // Preserve existing suggestions when using suggestion chunks
         suggestions = previousSuggestions;
-      } else if (!splitResult.valid) {
+      } else {
+        // Always fetch suggestions regardless of whether split is valid
         try {
         suggestions = await transactionIndexer.getSuggestedAmounts(connection, amountLamports, numChunks, poolsToUse);
           console.log('Generated suggestions:', suggestions.length, 'for', amountLamports / LAMPORTS_PER_SOL, 'SOL');
@@ -1870,10 +1871,10 @@ export default function ProdPage() {
                             >
                               <img src="/convert.svg" alt="Convert" style={{ width: '10.95px', height: '10.95px' }} />
                             </button>
-                          </div>
-                    )}
                   </div>
-            </div>
+          )}
+        </div>
+        </div>
 
                     {/* SOL button on right */}
                     <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: '9px 15px', gap: '8px', width: '108px', height: '55px', background: 'rgba(0, 0, 0, 0.004)', boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.03), inset 0px 2px 4.2px rgba(243, 243, 243, 0.25), inset 0px -3px 4px #F9F9F9', borderRadius: '10px' }}>
@@ -1890,14 +1891,14 @@ export default function ProdPage() {
                         fontWeight: 300,
                         fontSize: '18px',
                         lineHeight: '21px',
-                        textAlign: 'center',
+                textAlign: 'center',
                         letterSpacing: '0.03em',
                         color: '#000000'
                       }}>
                         {amountUnit}
-                      </span>
-                    </div>
-                  </div>
+                  </span>
+          </div>
+        </div>
                 </div>
         
                 {/* Destination Address Section */}
@@ -1918,13 +1919,13 @@ export default function ProdPage() {
                     }}>
                       Destination Address
                     </label>
-                  </div>
-                  <div style={{
+                </div>
+        <div style={{ 
                     boxSizing: 'border-box',
-                    display: 'flex',
+                  display: 'flex', 
                     flexDirection: 'row',
                     justifyContent: 'space-between',
-                    alignItems: 'center',
+                  alignItems: 'center', 
                     padding: '20px 15px',
                     gap: '10px',
                     width: '100%',
@@ -1937,13 +1938,13 @@ export default function ProdPage() {
                       value={destination}
                       onChange={(e) => setDestination(e.target.value)}
                       placeholder="Solana wallet address"
-                      disabled={loading}
+                          disabled={loading}
                       required
-                      style={{
+                          style={{
                         flex: 1,
                         background: 'transparent',
                         border: 'none',
-                        color: '#000',
+                            color: '#000',
                         fontSize: '16px',
                         lineHeight: '19px',
                         fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
@@ -1959,7 +1960,7 @@ export default function ProdPage() {
                       }}
                     />
                     {destination && isValidSolanaAddress(destination) && (
-                      <div style={{
+                            <div style={{ 
                         display: 'flex',
                         flexDirection: 'row',
                         justifyContent: 'center',
@@ -1973,278 +1974,20 @@ export default function ProdPage() {
                         borderRadius: '35.7px'
                       }}>
                         <span style={{ color: '#FFFFFF', fontSize: '13.44px', lineHeight: '13.44px' }}>✓</span>
-                      </div>
-          )}
-        </div>
-        </div>
-
-        {/* Split Preview */}
-        {amount && parseFloat(amount) > 0 && splitPreview && (
-          <div style={{ marginBottom: '20px' }}>
-            {splitPreview?.loading ? (
-      <div style={{ 
-                padding: '16px',
-                background: '#fafafa',
-                borderRadius: '8px',
-                border: '1px solid #ddd',
-                textAlign: 'center',
-                color: '#666',
-                fontSize: '13px'
-              }}>
-                Calculating optimal split...
-              </div>
-            ) : splitPreview?.result?.valid ? (
-          <div style={{ 
-                padding: '12px',
-                background: '#E3F9F3',
-                borderRadius: '8px',
-                border: '1px solid #00CC65'
-              }}>
-          <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px',
-                  marginBottom: '8px'
-                }}>
-                  <span style={{ color: '#00CC65', fontSize: '16px' }}>✓</span>
-                  <span style={{ color: '#00CC65', fontSize: '13px', fontWeight: '700', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
-                    Valid split found!
-                  </span>
-          </div>
-                {/* Show grouped split in boxes, similar to previous chunk pills */}
-                <div
-                  style={{
-                  display: 'flex', 
-                  flexWrap: 'wrap', 
-                  gap: '6px',
-                    marginTop: '8px',
-                  }}
-                >
-                  {(() => {
-                    const chunksSol = splitPreview.result.chunks.map((c) => c.sol);
-                    const grouped = new Map<number, number>();
-                    for (const chunk of chunksSol) {
-                      const rounded = Math.round(chunk * 1000) / 1000; // 0.001 SOL grouping
-                      grouped.set(rounded, (grouped.get(rounded) || 0) + 1);
-                    }
-                    const sorted = Array.from(grouped.entries()).sort((a, b) => a[0] - b[0]);
-                    return sorted.map(([amount, count], idx) => (
-                      <div
-                        key={idx}
-                      style={{ 
-                        padding: '6px 10px',
-                          background: '#E3F9F3',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontFamily: 'monospace',
-                          color: '#00A478',
-                          border: '1px solid #00CC65',
-                        }}
-                      >
-                        {amount.toFixed(3)} SOL{count > 1 ? ` (${count}×)` : ''}
-        </div>
-                    ));
-                  })()}
-                </div>
-                <div
-                  style={{
-                  fontSize: '11px', 
-                    color: '#666',
-                    marginTop: '8px',
-                  }}
-                >
-                  Total: {formatSolAmount(splitPreview.result.totalSol, solPrice, 3)} • Split:{' '}
-                  {formatChunkBreakdown(splitPreview.result.chunks.map((c) => c.sol))} • Each part
-                  matches historical transactions
-                </div>
-              </div>
-            ) : splitPreview?.result?.error ? (
-        <div style={{ 
-              padding: '12px',
-                background: '#FFC5C6',
-              borderRadius: '8px',
-                border: '1px solid #FF2232'
-              }}>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px',
-                  marginBottom: '8px'
-                }}>
-                  <span style={{ color: '#FF2232', fontSize: '16px' }}>
-                    ✗
-                  </span>
-                  <span style={{ color: '#FF2232', fontSize: '13px', fontWeight: '700', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}>
-                    {(() => {
-                      const errorText = splitPreview.result.error || '';
-                      
-                      // First, clean up any nested error messages or malformed text
-                      // Remove patterns like "(Cannot split 000.00)" or "(Cannot split X SOL)"
-                      let cleanError = errorText.replace(/\(Cannot split [^)]+\)/g, '').trim();
-                      
-                      // Remove any duplicate "Cannot split" patterns that might have been created
-                      cleanError = cleanError.replace(/Cannot split[^C]*?Cannot split/g, 'Cannot split').trim();
-                      
-                      // Remove any "000.00" or similar zero patterns that might be artifacts
-                      cleanError = cleanError.replace(/\b0{2,}\.0+\b/g, '').trim();
-                      cleanError = cleanError.replace(/\s+/g, ' ').trim(); // Normalize whitespace
-                      
-                      // Find the first valid "Cannot split X SOL" pattern
-                      const match = cleanError.match(/Cannot split ([\d.]+) SOL/);
-                      if (match && solPrice && match[1]) {
-                        const solAmount = parseFloat(match[1]);
-                        if (!isNaN(solAmount) && isFinite(solAmount) && solAmount > 0) {
-                          const usdAmount = solAmount * solPrice;
-                          
-                          // Check if USD amount is already in the error (avoid double formatting)
-                          if (!cleanError.includes(`$${usdAmount.toFixed(2)}`)) {
-                            // Replace the first occurrence of "Cannot split X SOL" with formatted version
-                            return cleanError.replace(
-                              /(Cannot split )([\d.]+)( SOL)/,
-                              (match, prefix, solStr, suffix) => {
-                                // Use the parsed amount to ensure correct formatting
-                                return `${prefix}${solAmount.toFixed(6)}${suffix} ($${usdAmount.toFixed(2)})`;
-                              }
-                            );
-                          }
-                        }
-                      }
-                      return cleanError;
-                    })()}
-                  </span>
-                  </div>
-                {splitPreview?.suggestions && splitPreview.suggestions.length > 0 && (
-                  <div style={{ marginTop: '12px' }}>
-                    <div style={{ color: '#666', fontSize: '12px', marginBottom: '8px' }}>
-                      Suggested amounts (click to use):
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {splitPreview.suggestions.map((suggestion, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => handleSelectSuggestion(suggestion.sol)}
-                          disabled={loading}
-                          style={{
-                            padding: '8px 12px',
-                            background: '#e5e5e5',
-                            border: '1px solid #ccc',
-                            borderRadius: '6px',
-                            cursor: loading ? 'not-allowed' : 'pointer',
-                            color: '#000',
-                            fontSize: '12px',
-                            opacity: loading ? 0.6 : 1,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'flex-start',
-                            gap: '4px'
-                          }}
-                        >
-                          <div style={{ fontWeight: '600' }}>
-                            {formatSolAmount(suggestion.sol, solPrice, 3)}
-                          </div>
-                          {suggestion.chunks && suggestion.chunks.length > 0 && (
-                            <div style={{ 
-                              fontSize: '10px', 
-                              color: '#666',
-                              fontFamily: 'monospace'
-                            }}>
-                              {formatChunkBreakdown(suggestion.chunks)}
                             </div>
                           )}
-                        </button>
-                ))}
               </div>
                   </div>
-                )}
-              </div>
-            ) : null}
-            </div>
-          )}
 
-        {/* Privacy Score Display */}
-        {splitPreview?.privacyScore && (
-                  <div style={{
-            marginBottom: '20px',
-            padding: '12px',
-            background: '#fafafa',
-                    borderRadius: '8px',
-            border: '1px solid #ddd',
-            textAlign: 'left',
-            color: '#000',
-            fontSize: '13px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "Segoe UI", Roboto, sans-serif'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: '700' }}>
-                Privacy Strength Score
-              </span>
-                    <span style={{ 
-                fontSize: '16px',
-                fontWeight: '800',
-                color: (() => {
-                  switch (splitPreview.privacyScore.level) {
-                    case 'weak': return '#FF2232';
-                    case 'moderate': return '#FF8C00';
-                    case 'strong': return '#00CC65';
-                    case 'very-strong': return '#00A478';
-                    default: return '#666';
-                  }
-                })()
-              }}>
-                {formatPrivacyScore(splitPreview.privacyScore.pss)}
-                    </span>
-                      </div>
-                      <div style={{ 
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '8px'
-            }}>
-              <span style={{
-                padding: '4px 8px',
-                borderRadius: '4px',
-                        fontSize: '11px',
-                fontWeight: '600',
-                color: '#fff',
-                background: (() => {
-                  switch (splitPreview.privacyScore.level) {
-                    case 'weak': return '#FF2232';
-                    case 'moderate': return '#FF8C00';
-                    case 'strong': return '#00CC65';
-                    case 'very-strong': return '#00A478';
-                    default: return '#666';
-                  }
-                })()
-              }}>
-                {splitPreview.privacyScore.level.charAt(0).toUpperCase() + splitPreview.privacyScore.level.slice(1)}
-              </span>
-              <span style={{ color: '#666', fontSize: '12px' }}>
-                {(() => {
-                  switch (splitPreview.privacyScore.level) {
-                    case 'weak': return 'Weak privacy. Transaction may be traceable. Consider using historical amounts for better privacy.';
-                    case 'moderate': return 'Moderate privacy. Resists basic analysis. Increasing delay or chunks may help.';
-                    case 'strong': return 'Strong privacy. Defeats most automated analysis. Good choice.';
-                    case 'very-strong': return 'Very strong privacy. Highly resistant to sophisticated graph analysis.';
-                    default: return 'Privacy level unknown.';
-                  }
-                })()}
-              </span>
-                      </div>
-            <div style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-              Privacy Delay: {delayMinutes === 0 ? '<1 min' : `${delayMinutes} min`}
-            </div>
-                  </div>
-        )}
         
                 {/* Transfer Time Section */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', height: '20px' }}>
-                    <span style={{
+                    <span style={{ 
                       fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
                       fontStyle: 'normal',
                       fontWeight: 400,
-                      fontSize: '16px',
+                fontSize: '16px',
                       lineHeight: '19px',
                       color: '#000000'
                     }}>
@@ -2268,7 +2011,7 @@ export default function ProdPage() {
                     >
                       <img src="/gear.svg" alt="Settings" style={{ width: '20px', height: '20px' }} />
                     </button>
-                  </div>
+                      </div>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '17px', width: '100%' }}>
                     {[
                       { minutes: 5, label: '5 Min', level: 'Low', color: '#D54E50' },
@@ -2290,10 +2033,10 @@ export default function ProdPage() {
                           }}
             disabled={loading}
                           style={{
-                            display: 'flex',
+              display: 'flex',
                             flexDirection: 'column',
                             justifyContent: 'center',
-                            alignItems: 'center',
+              alignItems: 'center',
                             padding: '8.64px 11.52px',
                             gap: '10px',
                             width: isSelected ? '164px' : '163px',
@@ -2319,21 +2062,21 @@ export default function ProdPage() {
                           }}>
                             {option.label}
                           </span>
-                          <span style={{
+              <span style={{
                             fontFamily: 'SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif',
                             fontStyle: 'normal',
                             fontWeight: 500,
-                            fontSize: '11px',
+                        fontSize: '11px',
                             lineHeight: '13px',
                             textAlign: 'center',
                             color: option.color
                           }}>
                             {option.level}
-                          </span>
+              </span>
                         </button>
                       );
                     })}
-                  </div>
+                      </div>
           </div>
 
         {/* Error Display */}
@@ -2440,30 +2183,53 @@ export default function ProdPage() {
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
-          borderRadius: 24,
-          background: 'rgba(255,255,255,0.9)',
-          border: '1px solid rgba(148,163,184,0.45)',
-          boxShadow: '0 22px 55px rgba(15,23,42,0.2)',
-          backdropFilter: 'blur(24px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+          position: 'relative',
+          borderRadius: 20,
+          background: 'rgba(255, 255, 255, 0.20)',
+          border: '1px solid rgba(255, 255, 255, 0.4)',
+          boxShadow: `
+            inset 0 2px 4px 0 rgba(255, 255, 255, 0.6),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+            inset 0 -1px 0 0 rgba(255, 255, 255, 0.3),
+            inset 0 -2px 8px 0 rgba(255, 255, 255, 0.2),
+            0 4px 12px rgba(0, 0, 0, 0.05)
+          `,
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          overflow: 'hidden',
           padding: 20,
         }}
       >
+        {/* Gradient overlay for glassy effect */}
         <div
           style={{
-            padding: 10,
-            borderRadius: 999,
-            background: 'rgba(254,243,199,0.95)',
-            border: '1px solid rgba(234,179,8,0.7)',
-            fontSize: 11,
-            color: '#92400e',
-            textAlign: 'center',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'linear-gradient(135deg, rgba(52, 52, 52, 0.05) 0%, rgba(207, 207, 207, 0.1) 50%, rgba(255, 255, 255, 0.4) 100%)',
+            pointerEvents: 'none',
+            borderRadius: 20,
           }}
-        >
-          Do not close this webpage while the transaction is in progress.
-              </div>
-        {steps.length > 0 ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        />
+        
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+          <div
+            style={{
+              padding: 10,
+              borderRadius: 999,
+              background: 'rgba(254,243,199,0.95)',
+              border: '1px solid rgba(234,179,8,0.7)',
+              fontSize: 11,
+              color: '#92400e',
+              textAlign: 'center',
+            }}
+          >
+            Do not close this webpage while the transaction is in progress.
+          </div>
+          {steps.length > 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div
               style={{
                 display: 'flex',
@@ -2510,17 +2276,240 @@ export default function ProdPage() {
             style={{
               flex: 1,
               display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+            }}
+          >
+            {/* Recommendations Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: 16, fontWeight: 500, color: '#000' }}>Recommended</span>
+            </div>
+            
+            {/* Recommendations Table */}
+            {(() => {
+              // Show recommendations if we have suggestions OR if we have an amount entered
+              const hasSuggestions = splitPreview?.suggestions && splitPreview.suggestions.length > 0;
+              const hasAmount = amount && parseFloat(amount) > 0;
+              
+              if (!hasSuggestions && !hasAmount) {
+                return (
+                  <div style={{
+              flex: 1,
+              display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: 12,
               color: '#9ca3af',
               textAlign: 'center',
-            }}
-          >
-            No active transaction yet. Configure your private send in the middle panel and start
-            when ready.
+                  }}>
+                    Enter an amount to see recommendations
+                  </div>
+                );
+              }
+              
+              const levelColors: Record<string, string> = {
+                'weak': '#D54E50',
+                'moderate': '#D2B375',
+                'strong': '#BBC45B',
+                'very-strong': '#4ED584',
+                'excellent': '#4ED584'
+              };
+              
+              const levelLabels: Record<string, string> = {
+                'weak': 'Weak',
+                'moderate': 'Moderate',
+                'strong': 'High',
+                'very-strong': 'Excellent',
+                'excellent': 'Excellent'
+              };
+              
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  {/* Table Header */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr',
+                    gap: '12px',
+                    padding: '8px 0',
+                    borderBottom: '1px solid #E8E8E8',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: '#666'
+                  }}>
+                    <div>Privacy Strength</div>
+                    <div>Amount</div>
+                    <div>Time</div>
+                  </div>
+                  
+                  {/* User's Selected Amount (if entered) - Show at top */}
+                  {amount && parseFloat(amount) > 0 && (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr 1fr',
+                      gap: '12px',
+                      padding: '12px 0',
+                      borderBottom: '1px solid #E8E8E8',
+                      fontSize: 14,
+                      color: '#000'
+                    }}>
+                      {/* Privacy Strength for user's amount */}
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        {splitPreview?.privacyScore ? (() => {
+                          const level = splitPreview.privacyScore.level === 'very-strong' ? 'excellent' : splitPreview.privacyScore.level;
+                          const color = levelColors[level] || '#666';
+                          const label = levelLabels[level] || 'Unknown';
+                          return (
+                            <span style={{
+                              padding: '4px 8px',
+                              borderRadius: '12px',
+                              fontSize: 11,
+                              fontWeight: 500,
+                              color: color,
+                              background: `${color}15`,
+                              border: `1px solid ${color}30`
+                            }}>
+                              {label} ({formatPrivacyScore(splitPreview.privacyScore.pss)})
+                            </span>
+                          );
+                        })() : (
+                          <span style={{ color: '#999' }}>-</span>
+                        )}
+                      </div>
+                      
+                      {/* User's Amount */}
+                      <div style={{ 
+                        fontSize: 14,
+                        color: '#000',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}>
+                        {formatSolAmount(amountSolForUi, solPrice, 2)}
+                      </div>
+                      
+                      {/* Time */}
+                      <div style={{ 
+                        fontSize: 14,
+                        color: '#000',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}>
+                        {delayMinutes < 60 
+                          ? `${delayMinutes} min` 
+                          : delayMinutes < 120 
+                          ? `1 hr`
+                          : `${Math.round(delayMinutes / 60)} hrs`}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Recommendation Rows */}
+                  {splitPreview.suggestions.map((suggestion, i) => {
+                    // Calculate privacy score for this specific suggestion
+                    const suggestionChunks = suggestion.chunks?.length || chunks;
+                    // Convert suggestion chunks to the format expected by calculatePrivacyScore
+                    const suggestionChunkObjects = (suggestion.chunks || []).map(sol => ({
+                      lamports: Math.floor(sol * LAMPORTS_PER_SOL),
+                      sol: sol,
+                      frequency: 0 // Will be looked up from availableAmounts
+                    }));
+                    
+                    // Convert availableAmounts to the correct format
+                    const availableAmountsForScore = (splitPreview.availableAmounts || []).map(a => ({
+                      lamports: Math.floor(a.sol * LAMPORTS_PER_SOL),
+                      sol: a.sol,
+                      frequency: a.frequency,
+                      isHistorical: a.isHistorical
+                    }));
+                    
+                    const suggestionPrivacyScore = calculatePrivacyScore(
+                      suggestionChunkObjects,
+                      delayMinutes,
+                      availableAmountsForScore,
+                      suggestionChunks
+                    );
+                    
+                    const displayLevel = suggestionPrivacyScore.level === 'very-strong' ? 'excellent' : suggestionPrivacyScore.level;
+                    const privacyColor = levelColors[displayLevel] || '#666';
+                    const privacyLabel = levelLabels[displayLevel] || 'Unknown';
+                    
+                    // Format time
+                    const timeText = delayMinutes < 60 
+                      ? `${delayMinutes} min` 
+                      : delayMinutes < 120 
+                      ? `1 hr`
+                      : `${Math.round(delayMinutes / 60)} hrs`;
+                    
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(suggestion.sol)}
+                        disabled={loading}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr 1fr',
+                          gap: '12px',
+                          padding: '12px 0',
+                          borderBottom: '1px solid #E8E8E8',
+                          background: 'transparent',
+                          border: 'none',
+                          borderLeft: 'none',
+                          borderRight: 'none',
+                          cursor: loading ? 'not-allowed' : 'pointer',
+                          textAlign: 'left',
+                          opacity: loading ? 0.6 : 1,
+                          transition: 'background 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!loading) e.currentTarget.style.background = '#f5f5f5';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                        }}
+                      >
+                        {/* Privacy Strength */}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <span style={{
+                            padding: '4px 8px',
+                            borderRadius: '12px',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            color: privacyColor,
+                            background: `${privacyColor}15`,
+                            border: `1px solid ${privacyColor}30`
+                          }}>
+                            {privacyLabel} ({formatPrivacyScore(suggestionPrivacyScore.pss)})
+                          </span>
+                        </div>
+                        
+                        {/* Amount */}
+                        <div style={{ 
+                          fontSize: 14,
+                          color: '#000',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}>
+                          {formatSolAmount(suggestion.sol, solPrice, 2)}
+                        </div>
+                        
+                        {/* Time */}
+                        <div style={{ 
+                          fontSize: 14,
+                          color: '#000',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}>
+                          {timeText}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             </div>
           )}
+        </div>
       </section>
           </div>
 
